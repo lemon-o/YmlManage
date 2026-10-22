@@ -1,0 +1,98 @@
+import os
+import shutil
+from pathlib import Path
+from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+from .config import PROFILES_DIR, ROOT_TEMPLATE_FILE
+from .routes import profiles, sources, nodes, sub, remote
+from .routes.profiles import get_default_template_content
+
+app = FastAPI(
+    title="YmlManage - 节点母本维护管理平台",
+    description="维护 Clash/Mihomo 母本配置文件，从外部订阅提取节点勾选导入并分发",
+    version="1.2.0"
+)
+
+# 允许跨域
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 挂载 API 路由
+app.include_router(profiles.router)
+app.include_router(sources.router)
+app.include_router(nodes.router)
+app.include_router(sub.router)
+app.include_router(remote.router)
+
+SVG_FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#2563eb"/>
+  <path d="M8 16h16M16 8v16" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="4" fill="#ffffff"/>
+  <circle cx="8" cy="16" r="2.2" fill="#93c5fd"/>
+  <circle cx="24" cy="16" r="2.2" fill="#93c5fd"/>
+  <circle cx="16" cy="8" r="2.2" fill="#93c5fd"/>
+  <circle cx="16" cy="24" r="2.2" fill="#93c5fd"/>
+</svg>"""
+
+
+@app.get("/favicon.ico")
+def get_favicon():
+    """纯矢量科技网络节点 Favicon (解决浏览器历史 emoji 缓存)"""
+    return Response(
+        content=SVG_FAVICON,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
+
+@app.on_event("startup")
+def init_default_data():
+    """首次启动时，若母本目录为空，则自动基于【母本模板.yml】生成默认母本"""
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 清理历史旧的优选节点文件
+    old_file = PROFILES_DIR / "优选节点.yaml"
+    if old_file.exists():
+        try:
+            old_file.unlink()
+        except Exception:
+            pass
+    
+    preferred_file = PROFILES_DIR / "母本模板.yaml"
+    if not preferred_file.exists():
+        if ROOT_TEMPLATE_FILE.exists():
+            shutil.copy2(ROOT_TEMPLATE_FILE, preferred_file)
+            print(f">> [初始化] 已成功将根目录【{ROOT_TEMPLATE_FILE.name}】载入为默认母本: 母本模板.yaml")
+        else:
+            with open(preferred_file, "w", encoding="utf-8") as f:
+                f.write(get_default_template_content())
+            print(">> [初始化] 已创建默认母本: 母本模板.yaml")
+
+
+# 静态文件前端托管
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        file_path = STATIC_DIR / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(STATIC_DIR / "index.html")
+else:
+    @app.get("/")
+    def index():
+        return {
+            "message": "YmlManage 后端运行中",
+            "docs": "/docs",
+            "api": "/api/profiles"
+        }
