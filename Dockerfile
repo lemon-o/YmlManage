@@ -34,8 +34,6 @@ RUN apt-get update && \
       gzip -d /tmp/mihomo.gz && \
       mv /tmp/mihomo /app/backend/bin/mihomo && \
       chmod +x /app/backend/bin/mihomo || echo "Notice: Mihomo binary download skipped" ) && \
-    apt-get purge -y gzip && \
-    apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 # 安装后端依赖
