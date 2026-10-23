@@ -157,28 +157,30 @@
           <span class="lan-live-dot"></span>
           <span class="lan-text">局域网: {{ systemInfo.lan_ip }}:{{ systemInfo.port }}</span>
         </div>
-        <button class="xui-nav-btn" @click="openRemoteUploadDialog(currentProfile)" title="将当前编辑好的母本上传至指定设备 (SMB/FTP/WebDAV)">
-          <el-icon><Upload /></el-icon>
-          <span>上传至远程</span>
-        </button>
-        <button class="xui-nav-btn" @click="openProfileModal">
-          <el-icon><Folder /></el-icon>
-          <span>母本管理</span>
-        </button>
-        <button class="xui-nav-btn" @click="openSourceModal">
-          <el-icon><Collection /></el-icon>
-          <span>常用订阅源</span>
-        </button>
-        <template v-if="authStatus.auth_required">
-          <button class="xui-nav-btn" @click="openChangePasswordDialog" title="修改 Docker 网页访问密码">
-            <el-icon><Key /></el-icon>
-            <span>修改密码</span>
+        <div class="header-nav-btns-row">
+          <button class="xui-nav-btn" @click="openRemoteUploadDialog(currentProfile)" title="将当前编辑好的母本上传至指定设备 (SMB/FTP/WebDAV)">
+            <el-icon><Upload /></el-icon>
+            <span>上传至远程</span>
           </button>
-          <button class="xui-nav-btn danger-hover" @click="handleLogout" title="退出当前登录">
-            <el-icon><SwitchButton /></el-icon>
-            <span>退出</span>
+          <button class="xui-nav-btn" @click="openProfileModal">
+            <el-icon><Folder /></el-icon>
+            <span>母本管理</span>
           </button>
-        </template>
+          <button class="xui-nav-btn" @click="openSourceModal">
+            <el-icon><Collection /></el-icon>
+            <span>常用订阅源</span>
+          </button>
+          <template v-if="authStatus.auth_required">
+            <button class="xui-nav-btn" @click="openChangePasswordDialog" title="修改 Docker 网页访问密码">
+              <el-icon><Key /></el-icon>
+              <span>修改密码</span>
+            </button>
+            <button class="xui-nav-btn danger-hover" @click="handleLogout" title="退出当前登录">
+              <el-icon><SwitchButton /></el-icon>
+              <span>退出</span>
+            </button>
+          </template>
+        </div>
       </div>
     </header>
 
@@ -567,7 +569,8 @@
     >
       <el-tabs v-model="profileActiveTab" class="xui-custom-tabs">
         <el-tab-pane label="母本列表" name="list">
-          <el-table :data="profileList" style="width: 100%" class="xui-custom-table" stripe>
+          <!-- 桌面端表格 (大屏宽屏展示) -->
+          <el-table :data="profileList" style="width: 100%" class="xui-custom-table desktop-only-table" stripe>
             <el-table-column prop="name" label="母本文件名" min-width="170">
               <template #default="{ row }">
                 <span class="tbl-name-label" :class="{ 'is-active': row.name === currentProfile }">
@@ -595,6 +598,63 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <!-- 手机端卡片列表 (零横向滚动，高亮【编辑】直接触达) -->
+          <div class="mobile-only-cards profile-mobile-card-list">
+            <div
+              v-for="row in profileList"
+              :key="row.name"
+              class="profile-m-item"
+              :class="{ 'is-current': row.name === currentProfile }"
+            >
+              <div class="pmi-head">
+                <div class="pmi-title">
+                  <span class="pmi-name">{{ row.name }}</span>
+                  <span v-if="row.name === currentProfile" class="curr-badge">当前</span>
+                </div>
+                <div class="pmi-meta-tags">
+                  <span class="pmi-tag">{{ row.proxy_count }} 节点</span>
+                  <span class="pmi-tag">{{ row.group_count }} 策略组</span>
+                </div>
+              </div>
+
+              <div class="pmi-time-row">
+                <span class="pmi-time-label">修改时间: {{ row.updated_at || '刚刚' }}</span>
+              </div>
+
+              <div class="pmi-actions-row">
+                <button class="pmi-btn pmi-btn-edit" @click="openProfileEditor(row.name)">
+                  <el-icon><Edit /></el-icon>
+                  <span>编辑</span>
+                </button>
+                <button
+                  class="pmi-btn pmi-btn-switch"
+                  :class="{ active: row.name === currentProfile }"
+                  :disabled="row.name === currentProfile"
+                  @click="switchProfile(row.name)"
+                >
+                  <el-icon><Check /></el-icon>
+                  <span>{{ row.name === currentProfile ? '已载入' : '切换' }}</span>
+                </button>
+                <button class="pmi-btn pmi-btn-sub" @click="openBackups(row.name)">
+                  <el-icon><DocumentCopy /></el-icon>
+                  <span>快照({{ row.backup_count }})</span>
+                </button>
+                <button class="pmi-btn pmi-btn-sub" @click="openRemoteUploadDialog(row.name)" title="上传到远程路径">
+                  <el-icon><Upload /></el-icon>
+                  <span>上传</span>
+                </button>
+                <el-popconfirm title="确认删除此母本文件吗？" @confirm="handleDeleteProfile(row.name)">
+                  <template #reference>
+                    <button class="pmi-btn pmi-btn-danger">
+                      <el-icon><Delete /></el-icon>
+                      <span>删除</span>
+                    </button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </div>
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="从链接下载母本" name="download">
@@ -655,7 +715,8 @@
           <span>添加新订阅源</span>
         </button>
       </div>
-      <el-table :data="savedSources" style="width: 100%" class="xui-custom-table" stripe>
+      <!-- 桌面端表格 -->
+      <el-table :data="savedSources" style="width: 100%" class="xui-custom-table desktop-only-table" stripe>
         <el-table-column prop="name" label="名称" width="160" />
         <el-table-column prop="url" label="订阅链接" min-width="480" show-overflow-tooltip />
         <el-table-column prop="notes" label="备注" width="110" show-overflow-tooltip />
@@ -669,6 +730,27 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 手机端卡片列表 -->
+      <div class="mobile-only-cards source-mobile-card-list">
+        <div v-for="row in savedSources" :key="row.id" class="source-m-item">
+          <div class="smi-head">
+            <span class="smi-name">{{ row.name }}</span>
+            <span v-if="row.notes" class="smi-notes">{{ row.notes }}</span>
+          </div>
+          <div class="smi-url">{{ row.url }}</div>
+          <div class="smi-actions">
+            <el-popconfirm title="确定删除此源？" @confirm="handleDeleteSource(row.id)">
+              <template #reference>
+                <button class="pmi-btn pmi-btn-danger">
+                  <el-icon><Delete /></el-icon>
+                  <span>删除</span>
+                </button>
+              </template>
+            </el-popconfirm>
+          </div>
+        </div>
+      </div>
     </el-dialog>
 
     <!-- 添加常用源弹窗 -->
@@ -3509,6 +3591,12 @@ const handleDeleteSource = async (id) => {
   gap: 12px;
 }
 
+.header-nav-btns-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 /* 按钮规范 (3X-UI 经典暗色/深蓝科技) */
 .xui-nav-btn {
   background: #2a2d36;
@@ -4319,6 +4407,184 @@ const handleDeleteSource = async (id) => {
   font-weight: 700;
 }
 
+/* 桌面端表格 vs 移动端卡片式自适应 */
+.desktop-only-table {
+  display: block;
+}
+
+.mobile-only-cards {
+  display: none !important;
+}
+
+.profile-mobile-card-list {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-m-item {
+  background: #23252b;
+  border: 1px solid #30333d;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.profile-m-item.is-current {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.pmi-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pmi-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pmi-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pmi-meta-tags {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pmi-tag {
+  background: #1a1b1f;
+  border: 1px solid #333842;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.pmi-time-row {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.pmi-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.pmi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 5px;
+  border: 1px solid #333842;
+  background: #2a2d36;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex: 1 1 auto;
+  min-width: 50px;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.pmi-btn-edit {
+  background: #2563eb !important;
+  border-color: #3b82f6 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.35);
+  flex: 1.2 1 auto;
+}
+
+.pmi-btn-edit:hover {
+  background: #1d4ed8 !important;
+}
+
+.pmi-btn-switch.active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.pmi-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+/* 常用源手机端卡片 */
+.source-mobile-card-list {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source-m-item {
+  background: #23252b;
+  border: 1px solid #30333d;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smi-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.smi-name {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 13px;
+}
+
+.smi-notes {
+  font-size: 11px;
+  color: #94a3b8;
+  background: #1a1b1f;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.smi-url {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.smi-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
 
 .row-actions-flex {
   display: flex !important;
@@ -4731,6 +4997,271 @@ const handleDeleteSource = async (id) => {
 .opt-txt {
   font-size: 12px;
   color: #cbd5e1;
+}
+
+
+/* ================= 移动端 / 手机端 UI 适配规范 (Scoped) ================= */
+@media (max-width: 768px) {
+  .xui-app-container {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+
+  .desktop-only-table {
+    display: none !important;
+  }
+
+  .mobile-only-cards {
+    display: flex !important;
+  }
+
+  /* 弹窗中的 tabs 在手机端紧凑展示，减少左右箭头占位 */
+  .xui-custom-tabs .el-tabs__item {
+    padding: 0 8px !important;
+    font-size: 12.5px !important;
+  }
+
+  .xui-custom-tabs .el-tabs__header {
+    margin-bottom: 12px !important;
+  }
+
+  /* 顶部导航栏自适应堆叠 */
+  .xui-top-header {
+    height: auto !important;
+    min-height: 54px;
+    padding: 10px 14px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .header-brand-section {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .status-pill-3x {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    justify-content: center !important;
+    font-size: 12px !important;
+    padding: 4px 10px !important;
+  }
+
+  .profile-select-inline {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  .profile-select-inline .inline-label {
+    white-space: nowrap !important;
+    font-size: 12px !important;
+  }
+
+  .profile-select-inline .el-select {
+    flex: 1 !important;
+    width: auto !important;
+  }
+
+  .header-action-section {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  .header-action-section .lan-pill-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+
+  /* 顶部操作按钮保持单行水平排布 */
+  .header-nav-btns-row {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+  }
+
+  .header-nav-btns-row::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .header-nav-btns-row .xui-nav-btn {
+    flex: 1 1 0 !important;
+    min-width: fit-content !important;
+    justify-content: center !important;
+    padding: 8px 6px !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
+    height: 38px !important;
+  }
+
+  /* 主工作区内边距微调 */
+  .xui-main-content {
+    padding: 12px 10px !important;
+    gap: 14px !important;
+  }
+
+  /* 工作区分割与指标栏 (手机端无需展示4张指标卡片) */
+  .xui-workspace-split {
+    display: block !important;
+  }
+
+  .xui-metrics-sidebar {
+    display: none !important;
+  }
+
+  /* 订阅提取控制卡片 */
+  .panel-head-bar {
+    padding: 12px 14px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .panel-head-title-flex {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+
+  .panel-head-right {
+    width: 100% !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .test-url-selector-wrap {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+  }
+
+  .test-url-selector-wrap .el-select {
+    flex: 1 !important;
+    width: auto !important;
+  }
+
+  .panel-head-right .xui-primary-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .panel-inner-body {
+    padding: 14px 12px !important;
+  }
+
+  .fetch-action-bar {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  .fetch-input-field {
+    width: 100% !important;
+  }
+
+  .fetch-action-bar .xui-std-btn,
+  .fetch-action-bar .xui-primary-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    height: 38px !important;
+  }
+
+  .panel-note-line {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+  }
+
+  .quick-sources-bar {
+    width: 100% !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 6px !important;
+  }
+
+  .quick-sources-bar .src-chip-btn {
+    flex-shrink: 0 !important;
+  }
+
+  /* 节点池操作与过滤 */
+  .panel-head-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .panel-head-actions .el-input {
+    width: 100% !important;
+  }
+
+  .xui-mini-btn-group {
+    width: 100% !important;
+    display: flex !important;
+  }
+
+  .xui-mini-btn-group .m-btn {
+    flex: 1 !important;
+    text-align: center !important;
+    padding: 5px 4px !important;
+    font-size: 11px !important;
+  }
+
+  .panel-head-actions .xui-primary-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .protocol-tabs-group {
+    width: 100% !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 6px !important;
+  }
+
+  .protocol-tabs-group .p-tab-btn {
+    flex-shrink: 0 !important;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+  }
+
+  /* 节点卡片网格单列流动 */
+  .xui-nodes-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .xui-node-card {
+    padding: 12px 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-nav-btns-row {
+    gap: 6px !important;
+  }
+
+  .header-nav-btns-row .xui-nav-btn {
+    padding: 7px 4px !important;
+    font-size: 11.5px !important;
+    gap: 4px !important;
+  }
 }
 
 .remote-footer-flex {
@@ -5928,5 +6459,278 @@ const handleDeleteSource = async (id) => {
   height: 28px !important;
   font-size: 12px !important;
   padding: 0 10px !important;
+}
+
+/* ================= 移动端 / 手机端 UI 适配规范 (Global Dialogs & Editor) ================= */
+@media (max-width: 768px) {
+  /* 全局弹窗宽度自适应全屏微留白 */
+  .el-dialog,
+  .xui-custom-dialog,
+  .xui-editor-dialog,
+  .fetch-progress-dialog,
+  .remote-upload-dialog {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 10px auto !important;
+    border-radius: 12px !important;
+  }
+
+  .el-dialog__header {
+    padding: 12px 16px !important;
+  }
+
+  .el-dialog__title {
+    font-size: 15px !important;
+  }
+
+  .el-dialog__body {
+    padding: 14px 14px !important;
+    max-height: 75vh !important;
+    overflow-y: auto !important;
+  }
+
+  .el-dialog__footer {
+    padding: 10px 16px !important;
+  }
+
+  /* 弹窗抽屉全屏适配 */
+  .el-drawer,
+  .xui-custom-drawer {
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+
+  /* 表单多列在手机端自动转单列 */
+  .form-cols-2,
+  .form-cols-3 {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+
+  .el-form-item {
+    margin-bottom: 12px !important;
+  }
+
+  /* 母本可视化编辑器弹窗移动端适配 */
+  .editor-tabs-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+    padding-bottom: 10px !important;
+  }
+
+  .editor-segmented-tabs {
+    display: flex !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .editor-tab-btn {
+    flex: 1 !important;
+    justify-content: center !important;
+    padding: 6px 4px !important;
+    font-size: 11px !important;
+    gap: 4px !important;
+  }
+
+  .tab-count-badge {
+    font-size: 10px !important;
+    padding: 1px 4px !important;
+  }
+
+  .editor-meta-pill-group {
+    display: none !important;
+  }
+
+  .editor-toolbar-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .editor-toolbar-left {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+  }
+
+  .editor-toolbar-left .el-input {
+    width: 100% !important;
+  }
+
+  .editor-toolbar-right {
+    width: 100% !important;
+  }
+
+  .editor-toolbar-right button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* 策略组 Zashboard 手机端单列铺满 */
+  .zashboard-groups-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    max-height: calc(85vh - 200px) !important;
+    padding-right: 2px !important;
+  }
+
+  .z-group-card {
+    height: auto !important;
+    min-height: 220px !important;
+    max-height: 380px !important;
+  }
+
+  .z-card-header {
+    padding: 10px 12px !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+
+  .z-header-left {
+    flex: 1 1 100% !important;
+    gap: 6px !important;
+    justify-content: space-between !important;
+  }
+
+  .z-group-name {
+    max-width: 140px !important;
+    font-size: 13px !important;
+  }
+
+  .z-header-actions {
+    width: 100% !important;
+    justify-content: flex-end !important;
+    gap: 6px !important;
+    margin-top: 4px !important;
+  }
+
+  .z-action-btn {
+    padding: 4px 6px !important;
+    font-size: 11px !important;
+  }
+
+  .z-card-submeta {
+    padding: 5px 12px !important;
+    font-size: 10px !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .z-card-chips-container {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+    max-height: 250px !important;
+  }
+
+  .z-node-chip {
+    padding: 3px 6px !important;
+    font-size: 11px !important;
+    max-width: 100% !important;
+  }
+
+  .z-chip-name {
+    max-width: 110px !important;
+  }
+
+  /* 节点列表网格手机端单列 */
+  .proxies-cards-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    max-height: calc(85vh - 200px) !important;
+  }
+
+  .editor-node-card {
+    padding: 12px 12px !important;
+  }
+
+  .editor-footer-flex {
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+
+  .footer-callout {
+    font-size: 11px !important;
+    text-align: center !important;
+  }
+
+  .editor-footer-flex .footer-btns {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .editor-footer-flex .footer-btns button {
+    flex: 1 !important;
+    justify-content: center !important;
+    margin-left: 0 !important;
+  }
+
+  /* 添加节点弹窗手机端 */
+  .add-nodes-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+  }
+
+  .add-nodes-toolbar .el-input {
+    width: 100% !important;
+  }
+
+  .quick-pick-btns {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+  }
+
+  .quick-pick-btns button {
+    flex: 1 !important;
+    text-align: center !important;
+  }
+
+  .cat-checkbox-grid {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
+  }
+
+  .add-nodes-scroll-area {
+    max-height: 52vh !important;
+  }
+
+  /* 登录与初始化页面手机端 */
+  .auth-fullscreen-container {
+    padding: 14px 10px !important;
+  }
+
+  .auth-glass-card {
+    padding: 24px 16px !important;
+    border-radius: 14px !important;
+  }
+
+  .auth-title {
+    font-size: 18px !important;
+  }
+
+  .auth-desc {
+    font-size: 12px !important;
+  }
+
+  .auth-submit-btn {
+    height: 44px !important;
+    font-size: 13px !important;
+  }
+
+  /* 表格在移动端优化 */
+  .xui-custom-table {
+    font-size: 12px !important;
+  }
+
+  .upload-3x-panel .el-upload-dragger {
+    padding: 20px 10px !important;
+  }
 }
 </style>
