@@ -8,7 +8,10 @@ import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import httpx
-import smbclient
+try:
+    import smbclient
+except ImportError:
+    smbclient = None
 
 from .config import DATA_DIR, PROFILES_DIR
 
@@ -239,6 +242,8 @@ class RemoteUploader:
 
     @classmethod
     def _upload_smb(cls, config: Dict[str, Any], file_content: bytes, profile_name: str, overwrite: bool) -> Dict[str, Any]:
+        if smbclient is None:
+            raise ImportError("系统未检测到 smbprotocol 依赖库，无法使用 SMB 协议，请使用 WebDAV 或 FTP，或在主机安装 pip install smbprotocol。")
         server, share, remote_path, port = cls._parse_smb_config(config, profile_name)
         username = config.get("username", "").strip() or None
         password = config.get("password", "") or None
@@ -273,6 +278,8 @@ class RemoteUploader:
 
     @classmethod
     def _test_smb(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        if smbclient is None:
+            raise ImportError("系统未检测到 smbprotocol 依赖库，无法使用 SMB 协议，请使用 WebDAV 或 FTP，或在主机安装 pip install smbprotocol。")
         server, share, _, port = cls._parse_smb_config(config, "test.yaml")
         username = config.get("username", "").strip() or None
         password = config.get("password", "") or None
