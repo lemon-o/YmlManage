@@ -25,9 +25,9 @@
 - 🚀 **自带客户端外部订阅分发**：
   - 工具内置 HTTP 订阅服务：`http://<IP>:<PORT>/sub/<profile_name>.yaml`。
   - 点击顶栏“复制客户端订阅直链”即可粘贴至 Clash Verge / Mihomo / 软路由客户端，全端自动同步。
-- 🐳 **双运行模式**：
-  - 支持本地 Python 一键启动。
-  - 支持 Docker 与 Docker Compose 容器化部署（适合 NAS、软路由或 VPS）。
+- 🐳 **双运行模式与 Docker 安全隔离**：
+  - 本地端（Windows/Mac/Linux 桌面）：一键直开，免密访问，开箱即用。
+  - Docker 端（NAS/VPS/软路由）：默认强制开启网页访问密码防护。首次部署访问自动引导进入初始化界面设置访问密码，密码持久化存储于 `data/auth.json`。后续每次访问需密码解锁，有效防范公网未授权访问。
 
 ---
 
@@ -64,6 +64,7 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - RUN_ENV=docker # 启用 Docker 运行模式（默认强制开启网页访问密码保护）
       - DATA_DIR=/app/data
       # 可选：如果希望订阅链接加密码保护，取消下面注释
       # - SUB_TOKEN=mysecret123

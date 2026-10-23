@@ -5,6 +5,39 @@ const api = axios.create({
   timeout: 60000
 })
 
+// 自动附加认证 Token（针对 Docker 环境网页密码访问）
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('ymlmanage_token')
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`
+    config.headers['X-Auth-Token'] = token
+  }
+  return config
+}, (error) => Promise.reject(error))
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      // 忽略检查登录状态自身的 401
+      if (!error.config.url.includes('/auth/login') && !error.config.url.includes('/auth/status')) {
+        localStorage.removeItem('ymlmanage_token')
+        if (window.__handleAuthExpired) {
+          window.__handleAuthExpired()
+        }
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// 认证与安全相关 API (Docker 访问密码控制)
+export const getAuthStatus = () => api.get('/auth/status')
+export const initAuth = (password, confirm_password) => api.post('/auth/init', { password, confirm_password })
+export const loginAuth = (password) => api.post('/auth/login', { password })
+export const logoutAuth = () => api.post('/auth/logout')
+export const changePassword = (data) => api.post('/auth/change-password', data)
+
 export const getProfiles = () => api.get('/profiles')
 export const getProfileDetail = (name) => api.get(`/profiles/${name}`)
 export const downloadProfile = (data) => api.post('/profiles/download', data)
@@ -31,9 +64,15 @@ export const deleteSource = (id) => api.delete(`/sources/${id}`)
 
 export const fetchNodes = (data) => api.post('/nodes/fetch', data)
 export const fetchNodesStream = (data, signal) => {
+  const headers = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('ymlmanage_token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+    headers['X-Auth-Token'] = token
+  }
   return fetch('/api/nodes/fetch-stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(data),
     signal
   })

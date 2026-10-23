@@ -11,6 +11,7 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - RUN_ENV=docker # 启用 Docker 运行模式（默认强制开启网页访问密码保护）
       - DATA_DIR=/app/data
       - SUB_TOKEN= # 如果需要保护订阅链接，可在此设置访问密钥，如 mysecret123
       - USER_AGENT=Clash.Meta; ClashVerge/1.7.7

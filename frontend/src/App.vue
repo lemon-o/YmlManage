@@ -1,5 +1,118 @@
 <template>
-  <div class="xui-app-container">
+  <!-- 1. 全屏安全认证/初始化层 (当且仅当 Docker 环境且未登录或未初始化时展示) -->
+  <div v-if="authStatus.auth_required && (!authStatus.is_initialized || !authStatus.logged_in)" class="auth-fullscreen-container">
+    <!-- 初始化界面：首次使用设置访问密码 -->
+    <div v-if="!authStatus.is_initialized" class="auth-glass-card">
+      <div class="auth-card-header">
+        <div class="auth-badge-docker">
+          <span class="live-dot-blue"></span>
+          <span>Docker 容器运行环境</span>
+        </div>
+        <h2 class="auth-title">系统初始化设置</h2>
+        <p class="auth-desc">
+          检测到服务运行在 Docker 容器中。为防止公开端口未授权访问并保护您的节点与母本配置安全，请先设置系统访问密码。
+        </p>
+      </div>
+
+      <el-form class="auth-form" label-position="top" @submit.prevent="handleInitPassword">
+        <el-form-item label="设置访问密码">
+          <el-input
+            v-model="initPasswordForm.password"
+            type="password"
+            show-password
+            placeholder="请输入管理员访问密码 (至少4位)"
+            size="large"
+            autofocus
+          >
+            <template #prefix><el-icon><Lock /></el-icon></template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="确认访问密码">
+          <el-input
+            v-model="initPasswordForm.confirm_password"
+            type="password"
+            show-password
+            placeholder="请再次输入以确认密码"
+            size="large"
+            @keyup.enter="handleInitPassword"
+          >
+            <template #prefix><el-icon><Check /></el-icon></template>
+          </el-input>
+        </el-form-item>
+
+        <div v-if="authErrorMessage" class="auth-error-banner">
+          {{ authErrorMessage }}
+        </div>
+
+        <button
+          type="button"
+          class="auth-submit-btn"
+          :disabled="submittingAuth || !initPasswordForm.password || !initPasswordForm.confirm_password"
+          @click="handleInitPassword"
+        >
+          <el-icon v-if="submittingAuth" class="is-loading"><Loading /></el-icon>
+          <span>{{ submittingAuth ? '正在保存初始化设置...' : '完成初始化并进入系统' }}</span>
+        </button>
+
+        <div class="auth-footer-tip">
+          <span class="tip-dot">•</span>
+          <span>设置后密码将持久化保存在数据目录 (auth.json) 中，后续重启或更新容器保持生效。</span>
+        </div>
+      </el-form>
+    </div>
+
+    <!-- 登录界面：已初始化但尚未登录 -->
+    <div v-else class="auth-glass-card">
+      <div class="auth-card-header">
+        <div class="auth-badge-docker">
+          <span class="live-dot-green"></span>
+          <span>安全保护已就绪</span>
+        </div>
+        <h2 class="auth-title">YmlManage 控制台</h2>
+        <p class="auth-desc">
+          已启用 Docker 容器安全防护，请输入访问密码以解锁控制面板。
+        </p>
+      </div>
+
+      <el-form class="auth-form" label-position="top" @submit.prevent="handleLogin">
+        <el-form-item label="访问密码">
+          <el-input
+            v-model="loginPassword"
+            type="password"
+            show-password
+            placeholder="请输入访问密码"
+            size="large"
+            autofocus
+            @keyup.enter="handleLogin"
+          >
+            <template #prefix><el-icon><Lock /></el-icon></template>
+          </el-input>
+        </el-form-item>
+
+        <div v-if="authErrorMessage" class="auth-error-banner">
+          {{ authErrorMessage }}
+        </div>
+
+        <button
+          type="button"
+          class="auth-submit-btn"
+          :disabled="submittingAuth || !loginPassword"
+          @click="handleLogin"
+        >
+          <el-icon v-if="submittingAuth" class="is-loading"><Loading /></el-icon>
+          <span>{{ submittingAuth ? '身份验证中...' : '验证并进入控制台' }}</span>
+        </button>
+
+        <div class="auth-footer-tip">
+          <span class="tip-dot">•</span>
+          <span>若忘记密码，可在宿主机挂载的 data/auth.json 中重置或删除。</span>
+        </div>
+      </el-form>
+    </div>
+  </div>
+
+  <!-- 2. 主系统界面 (本地免密环境 或 Docker环境已认证) -->
+  <div v-else class="xui-app-container">
     <!-- 顶部导航栏 (已删除左上角 3X 徽标，呼吸感拉开) -->
     <header class="xui-top-header">
       <div class="header-brand-section">
@@ -56,6 +169,16 @@
           <el-icon><Collection /></el-icon>
           <span>常用订阅源</span>
         </button>
+        <template v-if="authStatus.auth_required">
+          <button class="xui-nav-btn" @click="openChangePasswordDialog" title="修改 Docker 网页访问密码">
+            <el-icon><Key /></el-icon>
+            <span>修改密码</span>
+          </button>
+          <button class="xui-nav-btn danger-hover" @click="handleLogout" title="退出当前登录">
+            <el-icon><SwitchButton /></el-icon>
+            <span>退出</span>
+          </button>
+        </template>
       </div>
     </header>
 
@@ -1508,7 +1631,38 @@
         </div>
       </template>
     </el-dialog>
-  </div>
+
+    <!-- 修改网页访问密码弹窗 (Docker 模式) -->
+    <el-dialog
+      v-model="changePasswordDialogVisible"
+      title="修改访问密码"
+      width="440px"
+      class="xui-custom-dialog"
+    >
+      <el-form label-position="top">
+        <el-form-item label="当前原访问密码">
+          <el-input v-model="changePasswordForm.old_password" type="password" show-password placeholder="请输入当前密码" />
+        </el-form-item>
+        <el-form-item label="新访问密码">
+          <el-input v-model="changePasswordForm.new_password" type="password" show-password placeholder="请输入新密码 (至少4位)" />
+        </el-form-item>
+        <el-form-item label="确认新访问密码">
+          <el-input v-model="changePasswordForm.confirm_password" type="password" show-password placeholder="请再次输入新密码" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <button class="xui-std-btn" @click="changePasswordDialogVisible = false">取消</button>
+        <button
+          class="xui-primary-btn"
+          style="margin-left: 8px;"
+          :disabled="submittingChangePassword"
+          @click="handleConfirmChangePassword"
+        >
+          {{ submittingChangePassword ? '正在修改...' : '确认修改' }}
+        </button>
+      </template>
+    </el-dialog>
+    </div>
 </template>
 
 <script setup>
@@ -1518,9 +1672,157 @@ import {
   Folder, Collection, Download, Search,
   Upload, Check, Plus, UploadFilled,
   DocumentCopy, Connection, Files, CircleCheck, CircleClose, Loading, Link,
-  Close, Delete, Edit
+  Close, Delete, Edit, Lock, Key, SwitchButton
 } from '@element-plus/icons-vue'
 import * as api from './api'
+
+// 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
+const authStatus = ref({
+  loading: true,
+  auth_required: false,
+  is_docker: false,
+  is_initialized: true,
+  logged_in: true
+})
+const initPasswordForm = ref({ password: '', confirm_password: '' })
+const loginPassword = ref('')
+const authErrorMessage = ref('')
+const submittingAuth = ref(false)
+
+// 修改密码弹窗状态
+const changePasswordDialogVisible = ref(false)
+const changePasswordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
+const submittingChangePassword = ref(false)
+
+const checkAuthStatus = async () => {
+  authStatus.value.loading = true
+  authErrorMessage.value = ''
+  try {
+    const res = await api.getAuthStatus()
+    authStatus.value = {
+      loading: false,
+      auth_required: Boolean(res.data.auth_required),
+      is_docker: Boolean(res.data.is_docker),
+      is_initialized: Boolean(res.data.is_initialized),
+      logged_in: Boolean(res.data.logged_in)
+    }
+  } catch (err) {
+    console.error('获取认证状态失败:', err)
+    authStatus.value.loading = false
+  }
+}
+
+// 供 axios 响应拦截器 401 触发的全局失效通知
+window.__handleAuthExpired = () => {
+  if (authStatus.value.auth_required) {
+    authStatus.value.logged_in = false
+    ElMessage.warning('登录凭证已失效，请重新输入密码')
+  }
+}
+
+const handleInitPassword = async () => {
+  const p1 = initPasswordForm.value.password.trim()
+  const p2 = initPasswordForm.value.confirm_password.trim()
+  authErrorMessage.value = ''
+  if (!p1) {
+    authErrorMessage.value = '请输入访问密码'
+    return
+  }
+  if (p1.length < 4) {
+    authErrorMessage.value = '为保障安全，密码长度不能少于 4 位字符'
+    return
+  }
+  if (p1 !== p2) {
+    authErrorMessage.value = '两次输入的密码不一致，请重新确认'
+    return
+  }
+
+  submittingAuth.value = true
+  try {
+    const res = await api.initAuth(p1, p2)
+    if (res.data.token) {
+      localStorage.setItem('ymlmanage_token', res.data.token)
+    }
+    authStatus.value.is_initialized = true
+    authStatus.value.logged_in = true
+    ElMessage.success('系统访问密码设置成功，已为您自动登录！')
+    await initAppContent()
+  } catch (err) {
+    authErrorMessage.value = err.response?.data?.detail || err.message || '初始化失败，请重试'
+  } finally {
+    submittingAuth.value = false
+  }
+}
+
+const handleLogin = async () => {
+  const pwd = loginPassword.value.trim()
+  authErrorMessage.value = ''
+  if (!pwd) {
+    authErrorMessage.value = '请输入访问密码'
+    return
+  }
+
+  submittingAuth.value = true
+  try {
+    const res = await api.loginAuth(pwd)
+    if (res.data.token) {
+      localStorage.setItem('ymlmanage_token', res.data.token)
+    }
+    authStatus.value.logged_in = true
+    ElMessage.success('验证成功，已进入控制台')
+    await initAppContent()
+  } catch (err) {
+    authErrorMessage.value = err.response?.data?.detail || '访问密码错误，请重新输入'
+  } finally {
+    submittingAuth.value = false
+  }
+}
+
+const handleLogout = async () => {
+  try {
+    await api.logoutAuth()
+  } catch (e) {}
+  localStorage.removeItem('ymlmanage_token')
+  authStatus.value.logged_in = false
+  loginPassword.value = ''
+  authErrorMessage.value = ''
+  ElMessage.info('已安全退出登录')
+}
+
+const openChangePasswordDialog = () => {
+  changePasswordForm.value = { old_password: '', new_password: '', confirm_password: '' }
+  changePasswordDialogVisible.value = true
+}
+
+const handleConfirmChangePassword = async () => {
+  const f = changePasswordForm.value
+  if (!f.old_password) {
+    ElMessage.warning('请输入当前旧密码')
+    return
+  }
+  if (!f.new_password || f.new_password.length < 4) {
+    ElMessage.warning('新密码长度不能少于 4 位字符')
+    return
+  }
+  if (f.new_password !== f.confirm_password) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+
+  submittingChangePassword.value = true
+  try {
+    const res = await api.changePassword(f)
+    if (res.data.token) {
+      localStorage.setItem('ymlmanage_token', res.data.token)
+    }
+    changePasswordDialogVisible.value = false
+    ElMessage.success('访问密码已成功修改并已更新登录凭证！')
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || err.message || '修改密码失败')
+  } finally {
+    submittingChangePassword.value = false
+  }
+}
 
 const profileList = ref([])
 const currentProfile = ref('')
@@ -2229,11 +2531,18 @@ const copyLanUrl = async () => {
   ElMessage.info(`局域网访问地址: ${systemInfo.value.lan_url}`)
 }
 
-onMounted(async () => {
+const initAppContent = async () => {
   await loadSystemInfo()
   await loadTestUrls()
   await loadProfiles()
   await loadSources()
+}
+
+onMounted(async () => {
+  await checkAuthStatus()
+  if (!authStatus.value.auth_required || authStatus.value.logged_in) {
+    await initAppContent()
+  }
 })
 
 const loadProfiles = async () => {
@@ -4434,6 +4743,38 @@ const handleDeleteSource = async (id) => {
 
 <!-- 全局重载 Element Plus 弹窗与表格，彻底消除图3图4的割裂感 -->
 <style>
+/* ================= 全局 3X-UI 暗黑科技滚动条规范 (告别原生浅灰大粗条) ================= */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2b303d rgba(0, 0, 0, 0.2);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2c3240;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: all 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.6);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* 弹窗容器暗黑化 */
 .el-dialog {
   background-color: #23252b !important;
@@ -4606,6 +4947,174 @@ const handleDeleteSource = async (id) => {
   border-color: #2563eb !important;
 }
 
+/* ================= Docker 容器安全认证与初始化界面 ================= */
+.auth-fullscreen-container {
+  min-height: 100vh;
+  width: 100vw;
+  background-color: #0c0e12;
+  background-image: 
+    radial-gradient(circle at 50% 15%, rgba(37, 99, 235, 0.16), transparent 45%),
+    radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.05), transparent 35%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.auth-glass-card {
+  width: 100%;
+  max-width: 440px;
+  background-color: rgba(22, 25, 32, 0.9);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  padding: 38px 36px 32px 36px;
+  box-shadow: 
+    0 24px 60px rgba(0, 0, 0, 0.7),
+    0 0 1px 1px rgba(255, 255, 255, 0.05);
+  animation: authCardFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes authCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-card-header {
+  text-align: center;
+  margin-bottom: 26px;
+}
+
+.auth-badge-docker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  color: #60a5fa;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-bottom: 14px;
+}
+
+.live-dot-blue {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+}
+
+.live-dot-green {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.auth-title {
+  color: #f8fafc;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.3px;
+}
+
+.auth-desc {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.auth-form {
+  margin-top: 20px;
+}
+
+.auth-form .el-form-item {
+  margin-bottom: 18px;
+}
+
+.auth-form .el-form-item__label {
+  color: #cbd5e1 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding-bottom: 6px !important;
+}
+
+.auth-error-banner {
+  background-color: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.auth-submit-btn {
+  width: 100%;
+  height: 42px;
+  background-color: #2563eb;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  transition: all 0.15s ease;
+  margin-top: 8px;
+}
+
+.auth-submit-btn:hover:not(:disabled) {
+  background-color: #1d4ed8;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.5);
+}
+
+.auth-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.auth-footer-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 20px;
+}
+
+.tip-dot {
+  color: #3b82f6;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.danger-hover:hover {
+  background-color: rgba(239, 68, 68, 0.15) !important;
+  color: #ef4444 !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
 /* ================= 母本可视化与源码编辑器 (3X-UI 暗黑科技定制) ================= */
 .xui-editor-dialog {
   border-radius: 14px !important;
@@ -4759,7 +5268,41 @@ const handleDeleteSource = async (id) => {
   gap: 20px;
   max-height: calc(82vh - 220px);
   overflow-y: auto;
-  padding: 4px;
+  padding: 4px 10px 4px 4px;
+}
+
+.zashboard-groups-grid::-webkit-scrollbar,
+.proxies-cards-grid::-webkit-scrollbar,
+.z-card-chips-container::-webkit-scrollbar,
+.add-nodes-scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.zashboard-groups-grid::-webkit-scrollbar-track,
+.proxies-cards-grid::-webkit-scrollbar-track,
+.z-card-chips-container::-webkit-scrollbar-track,
+.add-nodes-scroll-area::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+}
+
+.zashboard-groups-grid::-webkit-scrollbar-thumb,
+.proxies-cards-grid::-webkit-scrollbar-thumb,
+.z-card-chips-container::-webkit-scrollbar-thumb,
+.add-nodes-scroll-area::-webkit-scrollbar-thumb {
+  background: #2c3240;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: all 0.2s ease;
+}
+
+.zashboard-groups-grid::-webkit-scrollbar-thumb:hover,
+.proxies-cards-grid::-webkit-scrollbar-thumb:hover,
+.z-card-chips-container::-webkit-scrollbar-thumb:hover,
+.add-nodes-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.6);
 }
 
 @media (max-width: 1080px) {
@@ -4774,6 +5317,8 @@ const handleDeleteSource = async (id) => {
   border-radius: 12px;
   display: flex;
   flex-direction: column;
+  height: 310px;
+  box-sizing: border-box;
   transition: all 0.2s ease;
   overflow: hidden;
 }
@@ -4784,10 +5329,11 @@ const handleDeleteSource = async (id) => {
 }
 
 .z-card-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 13px 18px;
   background-color: #1e222b;
   border-bottom: 1px solid #282d38;
 }
@@ -4900,6 +5446,7 @@ const handleDeleteSource = async (id) => {
 }
 
 .z-card-submeta {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -4921,14 +5468,33 @@ const handleDeleteSource = async (id) => {
 }
 
 .z-card-chips-container {
-  padding: 14px 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px 14px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-content: flex-start;
-  min-height: 120px;
-  max-height: 240px;
-  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.z-card-chips-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.z-card-chips-container::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.z-card-chips-container::-webkit-scrollbar-thumb {
+  background: #363d4d;
+  border-radius: 3px;
+}
+
+.z-card-chips-container::-webkit-scrollbar-thumb:hover {
+  background: #4b5568;
 }
 
 .z-node-chip {
