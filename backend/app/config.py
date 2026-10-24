@@ -12,6 +12,9 @@ SOURCES_FILE = DATA_DIR / "sources.json"
 # 根目录母本模板文件
 ROOT_TEMPLATE_FILE = BASE_DIR / "母本模板.yml"
 
+# 每个母本保留快照数量上限（默认最多保留最新的 20 份）
+MAX_BACKUPS_PER_PROFILE = int(os.environ.get("MAX_BACKUPS_PER_PROFILE", "20"))
+
 # 订阅分发保护 Token (空字符串表示无需 Token)
 SUB_TOKEN = os.environ.get("SUB_TOKEN", "")
 

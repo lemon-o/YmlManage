@@ -6,7 +6,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from ruamel.yaml import YAML
 from ruamel.yaml.compat import StringIO
 
-from .config import PROFILES_DIR, BACKUPS_DIR, DEFAULT_TEST_URL
+from .config import PROFILES_DIR, BACKUPS_DIR, DEFAULT_TEST_URL, MAX_BACKUPS_PER_PROFILE
 
 
 def get_yaml_instance() -> YAML:
@@ -194,23 +194,51 @@ class YamlManager:
         }
 
     @classmethod
+    def _rotate_backups(cls, stem: str, max_keep: int = MAX_BACKUPS_PER_PROFILE) -> None:
+        """自动轮换清理历史快照，只保留最新的 max_keep 份（默认 20 份）"""
+        if not BACKUPS_DIR.exists() or max_keep <= 0:
+            return
+
+        prefix = f"{stem}_"
+        backup_files = list(BACKUPS_DIR.glob(f"{prefix}*.bak"))
+        if len(backup_files) <= max_keep:
+            return
+
+        # 按最后修改时间倒序（最新的排在前）
+        backup_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+        # 超过限制的旧快照执行清理
+        files_to_remove = backup_files[max_keep:]
+        for old_f in files_to_remove:
+            try:
+                old_f.unlink()
+            except Exception:
+                pass
+
+    @classmethod
     def create_backup(cls, profile_name: str) -> Optional[str]:
-        """创建时间戳备份"""
+        """创建时间戳备份，并自动清理超出数量限制的旧备份（最多保留最新 20 份）"""
         path = cls.get_profile_path(profile_name)
         if not path.exists():
             return None
 
+        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"{path.stem}_{timestamp}.bak"
         backup_path = BACKUPS_DIR / backup_filename
 
         shutil.copy2(path, backup_path)
+
+        # 触发配额轮换清理，严格限制保留最新的 20 份快照
+        cls._rotate_backups(path.stem, max_keep=MAX_BACKUPS_PER_PROFILE)
+
         return backup_filename
 
     @classmethod
     def list_backups(cls, profile_name: str) -> List[Dict[str, Any]]:
-        """获取指定母本的所有历史备份"""
+        """获取指定母本的所有历史备份（按配额限制最多返回/保留最新 20 份）"""
         stem = Path(profile_name).stem
+        cls._rotate_backups(stem, max_keep=MAX_BACKUPS_PER_PROFILE)
         backups = []
         if not BACKUPS_DIR.exists():
             return backups

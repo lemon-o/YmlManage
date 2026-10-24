@@ -1468,10 +1468,11 @@
     <!-- 备份列表抽屉 -->
     <el-drawer
       v-model="backupDrawerVisible"
-      :title="`[${backupProfileName}] 快照备份记录`"
+      :title="`[${backupProfileName}] 快照备份记录 (${backupsList.length}/20)`"
       size="440px"
       class="xui-custom-drawer"
     >
+      <div style="font-size: 12px; color: #8b949e; margin-bottom: 14px; padding: 0 10px; line-height: 1.5;">系统已开启自动配额保护：每个母本最多保留最新的 20 份快照，超出时将自动轮换清理最旧版本。</div>
       <el-timeline v-if="backupsList.length > 0" style="padding-left: 10px;">
         <el-timeline-item
           v-for="b in backupsList"
