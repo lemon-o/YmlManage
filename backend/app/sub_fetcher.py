@@ -240,10 +240,35 @@ class SubscriptionFetcher:
             "Accept": "*/*"
         }
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0, verify=False) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            content = resp.text
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=20.0, verify=False) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                content = resp.text
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status == 403:
+                raise ValueError(
+                    "订阅源服务器拒绝访问 (HTTP 403 Forbidden)。\n"
+                    "常见原因：\n"
+                    "1. 该订阅链接已过期、流量已用尽，或在机场后台重置了订阅 Token（导致旧链接失效）；\n"
+                    "2. 机场已更换订阅域名（机场被封后常更换订阅地址，请登录机场官网复制最新生成的订阅链接）；\n"
+                    "3. 机场订阅开启了防刷限制或禁止当前 IP / 地区直接访问。"
+                ) from e
+            elif status == 404:
+                raise ValueError("订阅链接不存在 (HTTP 404 Not Found)，请核对链接地址是否正确或已被机场下线。") from e
+            elif status == 401:
+                raise ValueError("订阅认证失败 (HTTP 401 Unauthorized)，Token 鉴权失败，请重新获取最新链接。") from e
+            elif status in [502, 503, 504]:
+                raise ValueError(f"订阅服务器暂时不可用 (HTTP {status})，机场服务器可能正在维护，请稍后重试。") from e
+            else:
+                raise ValueError(f"订阅服务器返回错误状态码 (HTTP {status})") from e
+        except httpx.ConnectTimeout:
+            raise ValueError("连接订阅服务器超时，该订阅域名可能无法直连，请检查网络。")
+        except httpx.ConnectError as e:
+            raise ValueError(f"无法连接到订阅服务器 ({str(e)})，请检查域名解析或网络连通性。")
+        except Exception as e:
+            raise ValueError(f"拉取订阅发生异常: {str(e)}") from e
 
         return cls.parse_content(content)
 

@@ -275,7 +275,7 @@
                 提示：当前选取了国内直连接口，海外节点访问属于【出海再回国】线路，延迟通常偏高(400~1000ms+)。建议切换为 Cloudflare 204 或 Google 204 测出海外节点真实物理延迟。
               </span>
               <span v-else>
-                内置 Mihomo 官方内核与 DoH 直连公网探测真实 RTT 物理延迟，精准识别死节点。
+                内置 Mihomo 官方内核（已开启 Unified Delay 真实延迟算法）与 DoH 直连公网探测真实 RTT 握手延时，消除 TLS 握手干扰，精准识别死节点。
               </span>
             </div>
             <div class="filter-switch-wrap">
@@ -689,8 +689,9 @@
         <el-table-column prop="name" label="名称" width="160" />
         <el-table-column prop="url" label="订阅链接" min-width="480" show-overflow-tooltip />
         <el-table-column prop="notes" label="备注" width="110" show-overflow-tooltip />
-        <el-table-column label="操作" width="90" align="right">
+        <el-table-column label="操作" width="130" align="right">
           <template #default="{ row }">
+            <el-button size="small" type="primary" link @click="openEditSourceDialog(row)">编辑</el-button>
             <el-popconfirm title="确定删除此源？" @confirm="handleDeleteSource(row.id)">
               <template #reference>
                 <el-button size="small" type="danger" link>删除</el-button>
@@ -709,6 +710,10 @@
           </div>
           <div class="smi-url">{{ row.url }}</div>
           <div class="smi-actions">
+            <button class="pmi-btn" @click="openEditSourceDialog(row)">
+              <el-icon><Edit /></el-icon>
+              <span>编辑</span>
+            </button>
             <el-popconfirm title="确定删除此源？" @confirm="handleDeleteSource(row.id)">
               <template #reference>
                 <button class="pmi-btn pmi-btn-danger">
@@ -722,10 +727,10 @@
       </div>
     </el-dialog>
 
-    <!-- 添加常用源弹窗 -->
+    <!-- 添加 / 编辑常用源弹窗 -->
     <el-dialog
       v-model="addSourceDialogVisible"
-      title="添加常用订阅源"
+      :title="editingSourceId ? '编辑常用订阅源' : '添加常用订阅源'"
       width="480px"
       class="xui-custom-dialog"
     >
@@ -742,7 +747,9 @@
       </el-form>
       <template #footer>
         <button class="xui-std-btn" @click="addSourceDialogVisible = false">取消</button>
-        <button class="xui-primary-btn" style="margin-left: 8px;" @click="handleSaveSource">保存</button>
+        <button class="xui-primary-btn" style="margin-left: 8px;" @click="handleSaveSource">
+          {{ editingSourceId ? '保存修改' : '保存' }}
+        </button>
       </template>
     </el-dialog>
 
@@ -819,16 +826,35 @@
             </div>
           </div>
 
-          <!-- Zashboard 风格 2 列策略组卡片网格 -->
-          <div class="zashboard-groups-grid">
+          <!-- Zashboard 风格 2 列策略组卡片网格 (支持拖拽滚动条自动滚动 & 鼠标滚轮滚动) -->
+          <div
+            ref="groupsGridRef"
+            class="zashboard-groups-grid"
+            @dragover="handleGroupsGridDragOver"
+            @drop="handleGroupsGridDrop"
+            @wheel="handleDragWheel"
+          >
             <div
               v-for="(grp, gIdx) in filteredEditorGroups"
               :key="grp.name + '_' + gIdx"
+              :data-group-index="gIdx"
               class="z-group-card"
+              :class="{
+                'is-card-dragging': dragGroupCardIdx === gIdx,
+                'is-card-drop-target': dropTargetGroupCardIdx === gIdx
+              }"
+              draggable="true"
+              @dragstart="handleGroupCardDragStart($event, gIdx)"
+              @dragover="handleGroupCardDragOver($event, gIdx)"
+              @dragleave="handleGroupCardDragLeave"
+              @drop.stop="handleGroupCardDrop($event, gIdx)"
+              @dragend="handleGroupCardDragEnd"
+              @wheel="handleDragWheel"
             >
               <!-- 策略组卡片顶部 -->
               <div class="z-card-header">
                 <div class="z-header-left">
+                  <span class="z-card-drag-handle" title="按住拖拽调整策略组卡片顺序">⠿</span>
                   <span class="z-group-name" :title="grp.name">{{ grp.name }}</span>
                   <span class="z-type-pill" :class="'type-' + (grp.type || 'select')">{{ grp.type || 'select' }}</span>
                   <span class="z-node-count-badge">{{ (grp.proxies || []).length }} 节点</span>
@@ -933,6 +959,11 @@
               <span class="tb-count-text">共 {{ filteredEditorProxies.length }} / {{ editorProxies.length }} 个节点</span>
             </div>
             <div class="editor-toolbar-right">
+              <button class="xui-std-btn btn-sm" :disabled="testingProfileDelays" @click="handleTestAllProfileNodesDelay">
+                <el-icon v-if="!testingProfileDelays"><Odometer /></el-icon>
+                <el-icon v-else class="is-loading"><Loading /></el-icon>
+                <span>{{ testingProfileDelays ? '真延迟测定中...' : '真延迟测试 (Unified)' }}</span>
+              </button>
               <button class="xui-primary-btn btn-sm" @click="openAddNodeModal">
                 <el-icon><Plus /></el-icon>
                 <span>添加节点</span>
@@ -994,6 +1025,16 @@
                     所属 {{ getNodeGroupsCount(node.name) }} 个策略组
                   </span>
                 </el-tooltip>
+
+                <span
+                  class="node-delay-pill"
+                  :class="node.delay === 0 ? 'delay-testing' : (node.delay !== undefined ? getDelayClass(node.delay) : 'delay-none')"
+                  :title="node.delay > 0 ? `${node.delay} ms (Mihomo Unified Delay 真实延迟，点击重测)` : '点击单节点测真实延迟'"
+                  @click.stop="handleTestSingleProfileNodeDelay(node)"
+                >
+                  <el-icon v-if="node.delay === 0" class="is-loading" style="margin-right: 2px;"><Loading /></el-icon>
+                  {{ node.delay === 0 ? '测速中' : (node.delay > 0 ? `${node.delay} ms` : (node.delay === -1 ? '超时' : '测延迟')) }}
+                </span>
               </div>
             </div>
 
@@ -1044,7 +1085,7 @@
     <el-dialog
       v-model="addGroupDialogVisible"
       title="新建策略组"
-      width="480px"
+      width="540px"
       class="xui-custom-dialog"
     >
       <el-form label-position="top">
@@ -1062,6 +1103,45 @@
         <el-form-item v-if="newGroupForm.type !== 'select'" label="测速接口 URL">
           <el-input v-model="newGroupForm.url" placeholder="http://cp.cloudflare.com/generate_204" />
         </el-form-item>
+
+        <!-- 关联域名规则 -->
+        <div class="group-rules-section">
+          <div class="rules-section-header">
+            <span class="rules-section-title">分流域名规则 (选填)</span>
+            <span class="rules-section-tip">新建策略组时同步添加域名规则（分流到此策略组）</span>
+          </div>
+
+          <div v-if="newGroupRules.length > 0" class="rules-list-container">
+            <div v-for="(r, rIdx) in newGroupRules" :key="rIdx" class="rule-item-chip">
+              <span class="rule-type-badge">{{ r.type }}</span>
+              <span class="rule-payload-text" :title="r.payload">{{ r.payload }}</span>
+              <button type="button" class="rule-del-btn" title="删除" @click.stop="removeNewGroupRule(rIdx)">×</button>
+            </div>
+          </div>
+          <div v-else class="rules-empty-note">
+            暂未添加域名规则（支持创建后随时在策略组中增删）
+          </div>
+
+          <div class="rule-add-bar">
+            <el-select v-model="newGroupRuleType" size="small" style="width: 150px;">
+              <el-option label="DOMAIN-SUFFIX" value="DOMAIN-SUFFIX" />
+              <el-option label="DOMAIN" value="DOMAIN" />
+              <el-option label="DOMAIN-KEYWORD" value="DOMAIN-KEYWORD" />
+              <el-option label="GEOSITE" value="GEOSITE" />
+            </el-select>
+            <el-input
+              v-model="newGroupRulePayload"
+              size="small"
+              placeholder="输入域名，如 openai.com"
+              style="flex: 1;"
+              @keyup.enter="addNewGroupRule"
+            />
+            <button type="button" class="xui-std-btn btn-xs" @click="addNewGroupRule">
+              <el-icon><Plus /></el-icon>
+              <span>添加规则</span>
+            </button>
+          </div>
+        </div>
       </el-form>
       <template #footer>
         <button class="xui-std-btn" @click="addGroupDialogVisible = false">取消</button>
@@ -1146,7 +1226,7 @@
     <el-dialog
       v-model="editGroupModalVisible"
       :title="`编辑策略组: ${editingGroupForm.name}`"
-      width="480px"
+      width="560px"
       class="xui-custom-dialog"
     >
       <el-form label-position="top">
@@ -1174,6 +1254,47 @@
             </el-form-item>
           </div>
         </template>
+
+        <!-- 编辑策略组：自动显示该策略组下的所有域名规则，可以增删 -->
+        <div class="group-rules-section">
+          <div class="rules-section-header">
+            <span class="rules-section-title">该策略组下的域名规则 (共 {{ currentGroupRules.length }} 条)</span>
+            <span class="rules-section-tip">所有命中此类域名的流量都将被路由到此策略组</span>
+          </div>
+
+          <!-- 规则列表 -->
+          <div class="rules-list-container">
+            <div v-for="r in currentGroupRules" :key="r.index" class="rule-item-chip">
+              <span class="rule-type-badge">{{ r.type }}</span>
+              <span class="rule-payload-text" :title="r.payload">{{ r.payload }}</span>
+              <button type="button" class="rule-del-btn" title="删除此规则" @click.stop="deleteGroupRule(r.index)">×</button>
+            </div>
+            <div v-if="currentGroupRules.length === 0" class="rules-empty-note">
+              此策略组暂无专属分流域名规则
+            </div>
+          </div>
+
+          <!-- 增补新规则 -->
+          <div class="rule-add-bar">
+            <el-select v-model="editGroupRuleType" size="small" style="width: 150px;">
+              <el-option label="DOMAIN-SUFFIX" value="DOMAIN-SUFFIX" />
+              <el-option label="DOMAIN" value="DOMAIN" />
+              <el-option label="DOMAIN-KEYWORD" value="DOMAIN-KEYWORD" />
+              <el-option label="GEOSITE" value="GEOSITE" />
+            </el-select>
+            <el-input
+              v-model="editGroupRulePayload"
+              size="small"
+              placeholder="输入域名，如 google.com 或 openai"
+              style="flex: 1;"
+              @keyup.enter="addRuleToCurrentGroup"
+            />
+            <button type="button" class="xui-std-btn btn-xs" @click="addRuleToCurrentGroup">
+              <el-icon><Plus /></el-icon>
+              <span>添加规则</span>
+            </button>
+          </div>
+        </div>
       </el-form>
       <template #footer>
         <button class="xui-std-btn" @click="editGroupModalVisible = false">取消</button>
@@ -1418,7 +1539,7 @@
               <el-icon v-if="fetchProgressData.step > 3" :size="12"><Check /></el-icon>
               <span v-else>3</span>
             </span>
-            <span class="step-text">Mihomo 核心并发探测真实延迟并剔除死节点</span>
+            <span class="step-text">Mihomo 内核开启 Unified Delay 并发测定真实延迟并过滤死节点</span>
           </div>
 
           <div class="p-step-item" :class="getStepClass(4)">
@@ -1723,7 +1844,7 @@ import {
   Folder, Collection, Download, Search,
   Upload, Check, Plus, UploadFilled,
   DocumentCopy, Connection, Files, CircleCheck, CircleClose, Loading, Link,
-  Close, Delete, Edit, Lock, Key, SwitchButton
+  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer
 } from '@element-plus/icons-vue'
 import * as api from './api'
 
@@ -2274,8 +2395,10 @@ const savingEditor = ref(false)
 
 const editorProxies = ref([])
 const editorGroups = ref([])
+const editorRules = ref([])
 const editorRulesCount = ref(0)
 const rawYamlContent = ref('')
+const testingProfileDelays = ref(false)
 
 // 策略组子状态
 const groupSearchQuery = ref('')
@@ -2283,6 +2406,9 @@ const selectedEditGroup = ref(null)
 const nodesToAddToCurrentGroup = ref([])
 const addGroupDialogVisible = ref(false)
 const newGroupForm = ref({ name: '', type: 'select', url: 'http://cp.cloudflare.com/generate_204', interval: 300, tolerance: 50 })
+const newGroupRules = ref([])
+const newGroupRuleType = ref('DOMAIN-SUFFIX')
+const newGroupRulePayload = ref('')
 
 // 节点子状态
 const proxySearchQuery = ref('')
@@ -2341,17 +2467,227 @@ const dragGroupIndex = ref(null)
 const dragNodeIndex = ref(null)
 const dropTargetNodeIndex = ref(null)
 
+// 策略组卡片与节点整卡拖拽排序（含滚轮滚动与边缘自动滚屏）
+const groupsGridRef = ref(null)
+const dragGroupCardIdx = ref(null)
+const dropTargetGroupCardIdx = ref(null)
+
+let autoScrollRaf = null
+let autoScrollSpeed = 0
+let autoScrollContainer = null
+let lastDragClientX = 0
+let lastDragClientY = 0
+
+const performAutoScroll = () => {
+  if (!autoScrollContainer || autoScrollSpeed === 0) {
+    if (autoScrollRaf) {
+      cancelAnimationFrame(autoScrollRaf)
+      autoScrollRaf = null
+    }
+    return
+  }
+  autoScrollContainer.scrollTop += autoScrollSpeed
+
+  // 当鼠标静止悬停在容器边缘、而滚动条在自动滚动时，实时计算当前悬停卡片更新放置目标
+  if (dragGroupCardIdx.value !== null && lastDragClientX && lastDragClientY) {
+    const elem = document.elementFromPoint(lastDragClientX, lastDragClientY)
+    const cardElem = elem?.closest('.z-group-card')
+    if (cardElem && cardElem.dataset && cardElem.dataset.groupIndex !== undefined) {
+      dropTargetGroupCardIdx.value = parseInt(cardElem.dataset.groupIndex, 10)
+    }
+  }
+
+  autoScrollRaf = requestAnimationFrame(performAutoScroll)
+}
+
+const checkEdgeAutoScroll = (e, container) => {
+  if (!container) return
+  const rect = container.getBoundingClientRect()
+  const edgeZone = 90 // 触发自动滚动的边缘距离 (px)
+  const mouseY = e.clientY
+
+  if (mouseY >= rect.top - 40 && mouseY <= rect.top + edgeZone) {
+    // 靠近顶部边缘：向上滚动
+    const dist = Math.max(0, rect.top + edgeZone - mouseY)
+    const ratio = Math.min(1, dist / edgeZone)
+    autoScrollSpeed = -Math.round(ratio * 20 + 4)
+    autoScrollContainer = container
+    if (!autoScrollRaf) {
+      autoScrollRaf = requestAnimationFrame(performAutoScroll)
+    }
+  } else if (mouseY >= rect.bottom - edgeZone && mouseY <= rect.bottom + 40) {
+    // 靠近底部边缘：向下滚动
+    const dist = Math.max(0, mouseY - (rect.bottom - edgeZone))
+    const ratio = Math.min(1, dist / edgeZone)
+    autoScrollSpeed = Math.round(ratio * 20 + 4)
+    autoScrollContainer = container
+    if (!autoScrollRaf) {
+      autoScrollRaf = requestAnimationFrame(performAutoScroll)
+    }
+  } else {
+    // 位于安全区域：停止边缘自动滚动
+    autoScrollSpeed = 0
+    if (autoScrollRaf) {
+      cancelAnimationFrame(autoScrollRaf)
+      autoScrollRaf = null
+    }
+  }
+}
+
+const stopAutoScroll = () => {
+  autoScrollSpeed = 0
+  autoScrollContainer = null
+  if (autoScrollRaf) {
+    cancelAnimationFrame(autoScrollRaf)
+    autoScrollRaf = null
+  }
+}
+
+const handleDragWheel = (e) => {
+  if (dragGroupCardIdx.value === null && dragGroupIndex.value === null) return
+
+  // 1. 拖拽策略组卡片时：鼠标滚轮直接滚动策略组网格容器
+  if (dragGroupCardIdx.value !== null) {
+    const grid = groupsGridRef.value || document.querySelector('.zashboard-groups-grid')
+    if (grid) {
+      grid.scrollTop += e.deltaY
+      if (e.cancelable) e.preventDefault()
+    }
+    return
+  }
+
+  // 2. 拖拽节点 Chip 时：如果鼠标悬停在组内 chip 容器上且内容溢出则滚 chip 容器，否则滚动策略组网格
+  if (dragGroupIndex.value !== null) {
+    const elem = document.elementFromPoint(e.clientX, e.clientY)
+    const chipsBox = elem?.closest('.z-card-chips-container')
+    if (chipsBox && chipsBox.scrollHeight > chipsBox.clientHeight) {
+      chipsBox.scrollTop += e.deltaY
+      if (e.cancelable) e.preventDefault()
+    } else {
+      const grid = groupsGridRef.value || document.querySelector('.zashboard-groups-grid')
+      if (grid) {
+        grid.scrollTop += e.deltaY
+        if (e.cancelable) e.preventDefault()
+      }
+    }
+  }
+}
+
+const startDragScrollTracking = () => {
+  window.addEventListener('wheel', handleDragWheel, { passive: false, capture: true })
+  document.addEventListener('wheel', handleDragWheel, { passive: false, capture: true })
+}
+
+const stopDragScrollTracking = () => {
+  stopAutoScroll()
+  window.removeEventListener('wheel', handleDragWheel, { capture: true })
+  document.removeEventListener('wheel', handleDragWheel, { capture: true })
+}
+
+const handleGroupCardDragStart = (e, gIdx) => {
+  if (dragGroupIndex.value !== null) return
+  dragGroupCardIdx.value = gIdx
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', 'card_' + gIdx)
+  startDragScrollTracking()
+}
+
+const handleGroupCardDragOver = (e, gIdx) => {
+  if (dragGroupIndex.value !== null) {
+    if (groupsGridRef.value) {
+      checkEdgeAutoScroll(e, groupsGridRef.value)
+    }
+    return
+  }
+  if (dragGroupCardIdx.value === null) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'move'
+  dropTargetGroupCardIdx.value = gIdx
+  lastDragClientX = e.clientX
+  lastDragClientY = e.clientY
+  if (groupsGridRef.value) {
+    checkEdgeAutoScroll(e, groupsGridRef.value)
+  }
+}
+
+const handleGroupsGridDragOver = (e) => {
+  if (dragGroupCardIdx.value !== null || dragGroupIndex.value !== null) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    lastDragClientX = e.clientX
+    lastDragClientY = e.clientY
+    if (groupsGridRef.value) {
+      checkEdgeAutoScroll(e, groupsGridRef.value)
+    }
+  }
+}
+
+const handleGroupsGridDrop = (e) => {
+  if (dragGroupIndex.value !== null) return
+  e.preventDefault()
+  if (dragGroupCardIdx.value !== null) {
+    const fromGIdx = dragGroupCardIdx.value
+    const fromGrp = filteredEditorGroups.value[fromGIdx]
+    if (fromGrp) {
+      const realFromIdx = editorGroups.value.findIndex(g => g.name === fromGrp.name)
+      if (realFromIdx !== -1) {
+        const moved = editorGroups.value.splice(realFromIdx, 1)[0]
+        editorGroups.value.push(moved)
+      }
+    }
+    handleGroupCardDragEnd()
+  }
+}
+
+const handleGroupCardDragLeave = () => {
+  // 保持 target
+}
+
+const handleGroupCardDrop = (e, targetGIdx) => {
+  if (dragGroupIndex.value !== null) return
+  e.preventDefault()
+  const fromGIdx = dragGroupCardIdx.value
+  if (fromGIdx === null || fromGIdx === targetGIdx) {
+    handleGroupCardDragEnd()
+    return
+  }
+  const fromGrp = filteredEditorGroups.value[fromGIdx]
+  const targetGrp = filteredEditorGroups.value[targetGIdx]
+  if (fromGrp && targetGrp) {
+    const realFromIdx = editorGroups.value.findIndex(g => g.name === fromGrp.name)
+    const realTargetIdx = editorGroups.value.findIndex(g => g.name === targetGrp.name)
+    if (realFromIdx !== -1 && realTargetIdx !== -1 && realFromIdx !== realTargetIdx) {
+      const moved = editorGroups.value.splice(realFromIdx, 1)[0]
+      editorGroups.value.splice(realTargetIdx, 0, moved)
+    }
+  }
+  handleGroupCardDragEnd()
+}
+
+const handleGroupCardDragEnd = () => {
+  dragGroupCardIdx.value = null
+  dropTargetGroupCardIdx.value = null
+  stopDragScrollTracking()
+}
+
 const handleGroupNodeDragStart = (e, gIdx, pIdx) => {
+  e.stopPropagation()
   dragGroupIndex.value = gIdx
   dragNodeIndex.value = pIdx
   e.dataTransfer.effectAllowed = 'move'
   e.dataTransfer.setData('text/plain', String(pIdx))
+  startDragScrollTracking()
 }
 
 const handleGroupNodeDragOver = (e, gIdx, pIdx) => {
   if (dragGroupIndex.value !== gIdx) return
   e.dataTransfer.dropEffect = 'move'
   dropTargetNodeIndex.value = pIdx
+  lastDragClientX = e.clientX
+  lastDragClientY = e.clientY
+  if (groupsGridRef.value) {
+    checkEdgeAutoScroll(e, groupsGridRef.value)
+  }
 }
 
 const handleGroupNodeDragLeave = () => {
@@ -2395,6 +2731,7 @@ const handleGroupNodeDragEnd = () => {
   dragGroupIndex.value = null
   dragNodeIndex.value = null
   dropTargetNodeIndex.value = null
+  stopDragScrollTracking()
 }
 
 const removeNodeFromGroup = (grp, pIdx) => {
@@ -2407,6 +2744,116 @@ const removeNodeFromGroup = (grp, pIdx) => {
 const editGroupModalVisible = ref(false)
 const editingGroupTarget = ref(null)
 const editingGroupForm = ref({ name: '', type: 'select', url: '', interval: 300, tolerance: 50 })
+const editGroupRuleType = ref('DOMAIN-SUFFIX')
+const editGroupRulePayload = ref('')
+
+const currentGroupRules = computed(() => {
+  if (!editingGroupTarget.value) return []
+  const groupName = editingGroupTarget.value.name
+  const list = []
+  editorRules.value.forEach((r, idx) => {
+    if (typeof r !== 'string') return
+    const parts = r.split(',').map(s => s.trim())
+    if (parts.length >= 3 && parts[2] === groupName) {
+      list.push({
+        index: idx,
+        type: parts[0],
+        payload: parts[1],
+        policy: parts[2],
+        raw: r
+      })
+    }
+  })
+  return list
+})
+
+const addRuleToCurrentGroup = () => {
+  const payload = editGroupRulePayload.value.trim()
+  if (!payload) {
+    ElMessage.warning('请输入规则内容 (例如: google.com 或 openai)')
+    return
+  }
+  if (!editingGroupTarget.value) return
+  const currentGroupName = editingGroupTarget.value.name
+  const type = editGroupRuleType.value
+
+  // 1. 检查是否在当前策略组已存在
+  const existsInCurrent = editorRules.value.some(r => {
+    if (typeof r !== 'string') return false
+    const parts = r.split(',').map(s => s.trim())
+    return parts.length >= 3 &&
+           parts[0].toUpperCase() === type.toUpperCase() &&
+           parts[1].toLowerCase() === payload.toLowerCase() &&
+           parts[2] === currentGroupName
+  })
+  if (existsInCurrent) {
+    ElMessage.warning(`规则「${type},${payload}」已存在于当前策略组中`)
+    return
+  }
+
+  // 2. 检查是否在其他策略组中存在
+  const conflictRules = []
+  editorRules.value.forEach((r, idx) => {
+    if (typeof r !== 'string') return
+    const parts = r.split(',').map(s => s.trim())
+    if (parts.length >= 3 &&
+        parts[0].toUpperCase() === type.toUpperCase() &&
+        parts[1].toLowerCase() === payload.toLowerCase() &&
+        parts[2] !== currentGroupName) {
+      conflictRules.push({ index: idx, group: parts[2], raw: r })
+    }
+  })
+
+  const doInsertCurrentRule = () => {
+    const ruleStr = `${type},${payload},${currentGroupName}`
+    const matchIdx = editorRules.value.findIndex(item => {
+      const p = String(item).split(',')[0].trim().toUpperCase()
+      return p === 'MATCH' || p === 'GEOIP'
+    })
+    if (matchIdx !== -1) {
+      editorRules.value.splice(matchIdx, 0, ruleStr)
+    } else {
+      editorRules.value.push(ruleStr)
+    }
+    editGroupRulePayload.value = ''
+    ElMessage.success(`已添加规则: ${ruleStr}`)
+  }
+
+  if (conflictRules.length > 0) {
+    const otherGroups = [...new Set(conflictRules.map(c => c.group))].join('、')
+    ElMessageBox.confirm(
+      `规则「${type},${payload}」已存在于策略组「${otherGroups}」中，是否从原策略组删除并转入当前策略组「${currentGroupName}」？`,
+      '规则冲突提示',
+      {
+        confirmButtonText: '删除原规则并转入',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    ).then(() => {
+      // 从原策略组删除冲突规则
+      editorRules.value = editorRules.value.filter(r => {
+        if (typeof r !== 'string') return true
+        const p = r.split(',').map(s => s.trim())
+        return !(p.length >= 3 &&
+                 p[0].toUpperCase() === type.toUpperCase() &&
+                 p[1].toLowerCase() === payload.toLowerCase() &&
+                 p[2] !== currentGroupName)
+      })
+      doInsertCurrentRule()
+    }).catch(() => {
+      ElMessage.info('已取消添加')
+    })
+  } else {
+    doInsertCurrentRule()
+  }
+}
+
+const deleteGroupRule = (ruleIndex) => {
+  if (ruleIndex >= 0 && ruleIndex < editorRules.value.length) {
+    const removed = editorRules.value.splice(ruleIndex, 1)[0]
+    ElMessage.info(`已移除规则: ${removed}`)
+  }
+}
 
 const openEditGroupModal = (grp) => {
   editingGroupTarget.value = grp
@@ -2417,6 +2864,8 @@ const openEditGroupModal = (grp) => {
     interval: grp.interval || 300,
     tolerance: grp.tolerance || 50
   }
+  editGroupRuleType.value = 'DOMAIN-SUFFIX'
+  editGroupRulePayload.value = ''
   editGroupModalVisible.value = true
 }
 
@@ -2451,6 +2900,18 @@ const confirmSaveGroupEdit = () => {
         g.proxies = g.proxies.map(p => (p === oldName ? newName : p))
       }
     })
+    // 同步更新规则中的策略组名称
+    if (editorRules.value && editorRules.value.length > 0) {
+      editorRules.value = editorRules.value.map(ruleStr => {
+        if (typeof ruleStr !== 'string') return ruleStr
+        const parts = ruleStr.split(',').map(s => s.trim())
+        if (parts.length >= 3 && parts[2] === oldName) {
+          parts[2] = newName
+          return parts.join(',')
+        }
+        return ruleStr
+      })
+    }
   }
   editGroupModalVisible.value = false
   ElMessage.success(`策略组「${newName}」已更新`)
@@ -2987,6 +3448,7 @@ const openProfileEditor = async (name) => {
     const res = await api.getProfileStructure(name)
     editorProxies.value = res.data.proxies || []
     editorGroups.value = res.data.proxy_groups || []
+    editorRules.value = res.data.rules || []
     editorRulesCount.value = res.data.rules_count || 0
     rawYamlContent.value = res.data.raw_yaml || ''
     selectedEditGroup.value = editorGroups.value[0] || null
@@ -3018,7 +3480,74 @@ const openAddGroupDialog = () => {
     interval: 300,
     tolerance: 50
   }
+  newGroupRules.value = []
+  newGroupRuleType.value = 'DOMAIN-SUFFIX'
+  newGroupRulePayload.value = ''
   addGroupDialogVisible.value = true
+}
+
+const addNewGroupRule = () => {
+  const payload = newGroupRulePayload.value.trim()
+  if (!payload) {
+    ElMessage.warning('请输入域名规则内容 (例如: google.com 或 openai)')
+    return
+  }
+  const type = newGroupRuleType.value
+
+  // 1. 检查是否在当前新建列表中已存在
+  if (newGroupRules.value.some(r => r.type.toUpperCase() === type.toUpperCase() && r.payload.toLowerCase() === payload.toLowerCase())) {
+    ElMessage.warning('当前新建列表中已存在此规则')
+    return
+  }
+
+  // 2. 检查是否在现有母本策略组中存在
+  const conflictRules = []
+  editorRules.value.forEach((r, idx) => {
+    if (typeof r !== 'string') return
+    const parts = r.split(',').map(s => s.trim())
+    if (parts.length >= 3 &&
+        parts[0].toUpperCase() === type.toUpperCase() &&
+        parts[1].toLowerCase() === payload.toLowerCase()) {
+      conflictRules.push({ index: idx, group: parts[2], raw: r })
+    }
+  })
+
+  const doInsertNewRule = () => {
+    newGroupRules.value.push({ type, payload })
+    newGroupRulePayload.value = ''
+    ElMessage.success(`已添加规则: ${type},${payload}`)
+  }
+
+  if (conflictRules.length > 0) {
+    const otherGroups = [...new Set(conflictRules.map(c => c.group))].join('、')
+    ElMessageBox.confirm(
+      `规则「${type},${payload}」已存在于策略组「${otherGroups}」中，是否从原策略组删除并关联至此新建策略组？`,
+      '规则冲突提示',
+      {
+        confirmButtonText: '删除原规则并关联',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    ).then(() => {
+      // 从母本现有规则中删除该旧规则
+      editorRules.value = editorRules.value.filter(r => {
+        if (typeof r !== 'string') return true
+        const p = r.split(',').map(s => s.trim())
+        return !(p.length >= 3 &&
+                 p[0].toUpperCase() === type.toUpperCase() &&
+                 p[1].toLowerCase() === payload.toLowerCase())
+      })
+      doInsertNewRule()
+    }).catch(() => {
+      ElMessage.info('已取消操作')
+    })
+  } else {
+    doInsertNewRule()
+  }
+}
+
+const removeNewGroupRule = (idx) => {
+  newGroupRules.value.splice(idx, 1)
 }
 
 const confirmAddNewGroup = () => {
@@ -3043,6 +3572,23 @@ const confirmAddNewGroup = () => {
   }
   editorGroups.value.push(newG)
   selectedEditGroup.value = newG
+
+  // 写入新建时配置的域名规则
+  if (newGroupRules.value && newGroupRules.value.length > 0) {
+    newGroupRules.value.forEach(r => {
+      const ruleStr = `${r.type},${r.payload.trim()},${gName}`
+      const matchIdx = editorRules.value.findIndex(item => {
+        const p = String(item).split(',')[0].trim().toUpperCase()
+        return p === 'MATCH' || p === 'GEOIP'
+      })
+      if (matchIdx !== -1) {
+        editorRules.value.splice(matchIdx, 0, ruleStr)
+      } else {
+        editorRules.value.push(ruleStr)
+      }
+    })
+  }
+
   addGroupDialogVisible.value = false
   ElMessage.success(`成功创建策略组: ${gName}`)
 }
@@ -3051,6 +3597,14 @@ const handleDeleteGroup = (groupName) => {
   editorGroups.value = editorGroups.value.filter(g => g.name !== groupName)
   if (selectedEditGroup.value && selectedEditGroup.value.name === groupName) {
     selectedEditGroup.value = editorGroups.value[0] || null
+  }
+  // 同步移除专属该策略组的规则
+  if (editorRules.value && editorRules.value.length > 0) {
+    editorRules.value = editorRules.value.filter(r => {
+      if (typeof r !== 'string') return true
+      const parts = r.split(',').map(s => s.trim())
+      return !(parts.length >= 3 && parts[2] === groupName)
+    })
   }
   ElMessage.success(`已删除策略组: ${groupName}`)
 }
@@ -3217,6 +3771,49 @@ const handleClearAllProxies = () => {
   ElMessage.success('已清空母本中所有节点')
 }
 
+const handleTestAllProfileNodesDelay = async () => {
+  if (!editorProxies.value || editorProxies.value.length === 0) {
+    ElMessage.info('母本中暂无可测试的节点')
+    return
+  }
+  testingProfileDelays.value = true
+  ElMessage.info(`正在通过 Mihomo 内核测定 ${editorProxies.value.length} 个节点的 Unified Delay 真实 RTT 延迟...`)
+  try {
+    const res = await api.testNodesDelay({ nodes: editorProxies.value })
+    const delays = res.data.delays || {}
+    editorProxies.value.forEach(p => {
+      if (delays[p.name] !== undefined) {
+        p.delay = delays[p.name]
+      }
+    })
+    ElMessage.success(`测延迟完成（共测速 ${res.data.total} 个节点）`)
+  } catch (err) {
+    ElMessage.error('测试延迟失败: ' + (err.response?.data?.detail || err.message))
+  } finally {
+    testingProfileDelays.value = false
+  }
+}
+
+const handleTestSingleProfileNodeDelay = async (node) => {
+  if (!node) return
+  node.delay = 0
+  try {
+    const res = await api.testNodesDelay({ nodes: [node] })
+    const delays = res.data.delays || {}
+    if (delays[node.name] !== undefined) {
+      node.delay = delays[node.name]
+      if (node.delay > 0) {
+        ElMessage.success(`「${node.name}」延迟: ${node.delay} ms`)
+      } else {
+        ElMessage.warning(`「${node.name}」连接超时`)
+      }
+    }
+  } catch (err) {
+    ElMessage.error('测试延迟失败')
+    node.delay = -1
+  }
+}
+
 const switchEditorTab = async (tab) => {
   if (tab === editorActiveTab.value) return
 
@@ -3226,7 +3823,8 @@ const switchEditorTab = async (tab) => {
     try {
       const res = await api.previewProfileYaml(editorProfileName.value, {
         proxies: editorProxies.value,
-        proxy_groups: editorGroups.value
+        proxy_groups: editorGroups.value,
+        rules: editorRules.value
       })
       rawYamlContent.value = res.data.yaml
       editorActiveTab.value = 'yaml'
@@ -3245,6 +3843,7 @@ const switchEditorTab = async (tab) => {
       const res = await api.parseYamlText(rawYamlContent.value)
       editorProxies.value = res.data.proxies || []
       editorGroups.value = res.data.proxy_groups || []
+      if (res.data.rules) editorRules.value = res.data.rules
       if (!selectedEditGroup.value || !editorGroups.value.some(g => g.name === selectedEditGroup.value.name)) {
         selectedEditGroup.value = editorGroups.value[0] || null
       }
@@ -3269,7 +3868,8 @@ const handleSaveEditorData = async () => {
     } else {
       await api.saveProfileStructure(editorProfileName.value, {
         proxies: editorProxies.value,
-        proxy_groups: editorGroups.value
+        proxy_groups: editorGroups.value,
+        rules: editorRules.value
       })
     }
     ElMessage.success('母本配置保存成功，已自动生成快照备份！')
@@ -3306,12 +3906,25 @@ const handleRestoreBackup = async (filename) => {
   }
 }
 
+const editingSourceId = ref(null)
+
 const openSourceModal = () => {
   sourceModalVisible.value = true
 }
 
 const openAddSourceDialog = () => {
+  editingSourceId.value = null
   sourceForm.value = { name: '', url: '', notes: '' }
+  addSourceDialogVisible.value = true
+}
+
+const openEditSourceDialog = (row) => {
+  editingSourceId.value = row.id
+  sourceForm.value = {
+    name: row.name || '',
+    url: row.url || '',
+    notes: row.notes || ''
+  }
   addSourceDialogVisible.value = true
 }
 
@@ -3321,12 +3934,17 @@ const handleSaveSource = async () => {
     return
   }
   try {
-    await api.addSource(sourceForm.value)
-    ElMessage.success('添加成功')
+    if (editingSourceId.value) {
+      await api.updateSource(editingSourceId.value, sourceForm.value)
+      ElMessage.success('订阅源已更新')
+    } else {
+      await api.addSource(sourceForm.value)
+      ElMessage.success('添加成功')
+    }
     addSourceDialogVisible.value = false
     await loadSources()
   } catch (err) {
-    ElMessage.error('保存失败')
+    ElMessage.error(editingSourceId.value ? '更新失败' : '保存失败')
   }
 }
 
@@ -4431,11 +5049,12 @@ const handleDeleteSource = async (id) => {
 
 .status-sub-msg {
   font-size: 12px;
-  color: #8b949e;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #94a3b8;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 140px;
+  overflow-y: auto;
 }
 
 /* 进度条 */
@@ -5020,6 +5639,167 @@ const handleDeleteSource = async (id) => {
   align-items: center;
   width: 100%;
 }
+
+/* 策略组关联域名规则样式 */
+.group-rules-section {
+  margin-top: 14px;
+  padding: 12px;
+  background-color: #16181d;
+  border: 1px solid #282d38;
+  border-radius: 8px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.rules-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.rules-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.rules-section-tip {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.rules-list-container {
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px;
+  background-color: #121316;
+  border-radius: 6px;
+  border: 1px solid #1f232b;
+  min-height: 42px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.rules-empty-note {
+  font-size: 12px;
+  color: #475569;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  width: 100%;
+  text-align: center;
+  background-color: #121316;
+  border-radius: 6px;
+  border: 1px dashed #282d38;
+  margin-bottom: 10px;
+}
+
+.rule-item-chip {
+  display: inline-flex;
+  align-items: center;
+  background-color: #1c2128;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.rule-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  font-family: Consolas, Monaco, monospace;
+}
+
+.rule-payload-text {
+  color: #cbd5e1;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, Monaco, monospace;
+}
+
+.rule-del-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.rule-del-btn:hover {
+  color: #ef4444;
+}
+
+.rule-add-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 策略组卡片整卡拖拽样式 */
+.z-group-card.is-card-dragging {
+  opacity: 0.45;
+  border: 1px dashed #3b82f6 !important;
+  transform: scale(0.985);
+}
+
+.z-group-card.is-card-drop-target {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35) !important;
+}
+
+.z-card-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: #64748b;
+  cursor: grab;
+  user-select: none;
+  margin-right: 6px;
+  padding: 0 3px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.z-card-drag-handle:hover {
+  color: #60a5fa;
+  background-color: rgba(96, 165, 250, 0.15);
+}
+
+.z-card-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 未测与测速中延迟状态 */
+.delay-none {
+  background-color: rgba(148, 163, 184, 0.1) !important;
+  color: #64748b !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  cursor: pointer;
+}
+
+.delay-testing {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  color: #60a5fa !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  cursor: wait;
+}
+
 </style>
 
 <!-- 全局重载 Element Plus 弹窗与表格，彻底消除图3图4的割裂感 -->
@@ -6025,9 +6805,14 @@ const handleDeleteSource = async (id) => {
 .n-card-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-top: 2px;
   padding-top: 8px;
   border-top: 1px solid #232731;
+}
+
+.n-card-footer .node-delay-pill {
+  margin-left: auto;
 }
 
 .groups-included-pill {

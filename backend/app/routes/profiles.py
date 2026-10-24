@@ -36,6 +36,7 @@ class SaveRawRequest(BaseModel):
 class SaveStructureRequest(BaseModel):
     proxies: List[Dict[str, Any]] = Field(default_factory=list, description="节点列表")
     proxy_groups: List[Dict[str, Any]] = Field(default_factory=list, description="策略组列表")
+    rules: Optional[List[str]] = Field(default=None, description="分流规则列表")
 
 
 class ParseNodeRequest(BaseModel):
@@ -57,6 +58,8 @@ mixed-port: 7890
 allow-lan: true
 mode: Rule
 log-level: info
+unified-delay: true
+tcp-concurrent: true
 external-controller: 127.0.0.1:9090
 
 dns:
@@ -285,6 +288,19 @@ async def download_profile_from_url(req: DownloadProfileRequest):
             resp = await client.get(req.url, headers=headers)
             resp.raise_for_status()
             content = resp.text
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status == 403:
+            raise HTTPException(
+                status_code=400,
+                detail="订阅服务器拒绝访问 (HTTP 403 Forbidden)。常见原因：订阅已过期、Token 已在机场后台重置，或机场已更换订阅域名，请登录机场官网复制最新链接。"
+            )
+        elif status == 404:
+            raise HTTPException(status_code=400, detail="订阅链接不存在 (HTTP 404 Not Found)，请核对订阅地址。")
+        elif status == 401:
+            raise HTTPException(status_code=400, detail="订阅认证失败 (HTTP 401 Unauthorized)，Token 鉴权失效。")
+        else:
+            raise HTTPException(status_code=400, detail=f"订阅服务器返回错误状态码 (HTTP {status})")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"拉取订阅链接失败: {str(e)}")
 
@@ -437,7 +453,7 @@ def get_profile_structure(name: str):
 def save_profile_structure(name: str, req: SaveStructureRequest):
     """可视化保存母本中的节点与策略组，无损写回并自动备份"""
     try:
-        return YamlManager.save_profile_structure(name, req.proxies, req.proxy_groups)
+        return YamlManager.save_profile_structure(name, req.proxies, req.proxy_groups, req.rules)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="母本不存在")
     except Exception as e:
@@ -448,7 +464,7 @@ def save_profile_structure(name: str, req: SaveStructureRequest):
 def preview_profile_yaml(name: str, req: SaveStructureRequest):
     """根据当前修改的节点和策略组生成实时 YAML 预览文本（不保存至磁盘）"""
     try:
-        yaml_str = YamlManager.preview_profile_yaml(name, req.proxies, req.proxy_groups)
+        yaml_str = YamlManager.preview_profile_yaml(name, req.proxies, req.proxy_groups, req.rules)
         return {"yaml": yaml_str}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"生成 YAML 预览失败: {str(e)}")

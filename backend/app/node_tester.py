@@ -177,6 +177,8 @@ class MihomoSession:
                 "external-controller": f"127.0.0.1:{self.ext_port}",
                 "mode": "global",
                 "log-level": "silent",
+                "unified-delay": True,
+                "tcp-concurrent": True,
                 "hosts": hosts_map,
                 "dns": {
                     "enable": True,
@@ -305,8 +307,8 @@ async def test_and_filter_nodes(
     on_progress: Optional[Any] = None
 ) -> List[Dict[str, Any]]:
     """
-    使用内置 Mihomo 官方内核执行对标 NekoBox 逻辑的 URL Test 真实延迟探测与死节点过滤。
-    通过节点并发发起轻量 HTTP GET 204/200 探针请求，精确测量首字节响应时延 (TTFB / RTT)。
+    使用内置 Mihomo 官方内核执行真实延迟测试（Unified Delay 统一真实 RTT 延迟算法）。
+    剔除本地至节点握手协议差异干扰，精确测量首字节真实响应时延 (TTFB / RTT)，支持死节点精准过滤。
     支持实时进度回调，测试完毕立即自动清理释放内核资源。
     """
     if not nodes:

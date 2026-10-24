@@ -29,6 +29,12 @@ class ImportNodesRequest(BaseModel):
     overwrite: bool = Field(default=True, description="若母本已存在同名节点，是否覆盖配置")
 
 
+class TestNodesDelayRequest(BaseModel):
+    nodes: List[Dict[str, Any]] = Field(..., description="要测试延迟的节点列表")
+    test_url: Optional[str] = Field(default=None, description="测试 URL")
+    timeout: Optional[float] = Field(default=3.5, description="超时秒数")
+
+
 @router.post("/fetch-stream")
 async def fetch_nodes_stream(req: FetchNodesRequest):
     """
@@ -315,3 +321,23 @@ def import_selected_nodes(req: ImportNodesRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
+
+@router.post("/test-delays")
+async def test_nodes_delay_endpoint(req: TestNodesDelayRequest):
+    """
+    直接对传入的节点列表执行真实 URL Test 延迟测试，返回每个节点的 delay
+    """
+    if not req.nodes:
+        return {"delays": {}}
+
+    active_test_url = (req.test_url.strip() if req.test_url and req.test_url.strip() else None) or DEFAULT_TEST_URL
+    results = await test_and_filter_nodes_session(
+        req.nodes,
+        test_url=active_test_url,
+        concurrency=25,
+        timeout=req.timeout or 3.5,
+        filter_dead=False  # 不过滤，全部返回以便显示延迟或超时
+    )
+    delays_map = {n.get("name"): n.get("delay", -1) for n in results}
+    return {"delays": delays_map}

@@ -172,6 +172,12 @@ class YamlManager:
                         hc["url"] = clean_url
                         updated_providers.append(str(p_name))
 
+        # 确保母本开启真实延迟测试 (Unified Delay) 与 TCP 并发连接
+        if "unified-delay" not in data:
+            data["unified-delay"] = True
+        if "tcp-concurrent" not in data:
+            data["tcp-concurrent"] = True
+
         # 3. 创建自动备份并保存
         backup_file = cls.create_backup(profile_name)
         with open(path, "w", encoding="utf-8") as f:
@@ -364,6 +370,12 @@ class YamlManager:
                         
                         groups_updated.append(str(group.get("name")))
 
+        # 4. 确保母本开启真实延迟测试 (Unified Delay) 与 TCP 并发连接
+        if "unified-delay" not in data:
+            data["unified-delay"] = True
+        if "tcp-concurrent" not in data:
+            data["tcp-concurrent"] = True
+
         # 4. 执行自动备份
         backup_file = cls.create_backup(profile_name)
 
@@ -410,6 +422,7 @@ class YamlManager:
             "name": path.name,
             "proxies": clean_proxies,
             "proxy_groups": clean_groups,
+            "rules": [str(r) for r in rules if r] if isinstance(rules, list) else [],
             "rules_count": len(rules) if isinstance(rules, list) else 0,
             "raw_yaml": raw_content
         }
@@ -419,7 +432,8 @@ class YamlManager:
         cls,
         profile_name: str,
         proxies: List[Dict[str, Any]],
-        proxy_groups: List[Dict[str, Any]]
+        proxy_groups: List[Dict[str, Any]],
+        rules: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """可视化保存母本中的节点与策略组配置，无损保留注释及其他顶级配置"""
         path = cls.get_profile_path(profile_name)
@@ -432,6 +446,14 @@ class YamlManager:
 
         data["proxies"] = proxies
         data["proxy-groups"] = proxy_groups
+        if rules is not None:
+            data["rules"] = rules
+
+        # 确保母本开启真实延迟测试 (Unified Delay) 与 TCP 并发连接
+        if "unified-delay" not in data:
+            data["unified-delay"] = True
+        if "tcp-concurrent" not in data:
+            data["tcp-concurrent"] = True
 
         cls.create_backup(profile_name)
 
@@ -446,6 +468,7 @@ class YamlManager:
             "message": "母本配置保存成功，已生成快照备份",
             "proxy_count": len(proxies),
             "group_count": len(proxy_groups),
+            "rules_count": len(data.get("rules") or []),
             "raw_yaml": updated_content
         }
 
@@ -454,7 +477,8 @@ class YamlManager:
         cls,
         profile_name: str,
         proxies: List[Dict[str, Any]],
-        proxy_groups: List[Dict[str, Any]]
+        proxy_groups: List[Dict[str, Any]],
+        rules: Optional[List[str]] = None
     ) -> str:
         """根据当前修改的节点和策略组生成 YAML 预览文本（不保存至磁盘）"""
         path = cls.get_profile_path(profile_name)
@@ -468,6 +492,14 @@ class YamlManager:
 
         data["proxies"] = proxies
         data["proxy-groups"] = proxy_groups
+        if rules is not None:
+            data["rules"] = rules
+
+        # 确保母本开启真实延迟测试 (Unified Delay) 与 TCP 并发连接
+        if "unified-delay" not in data:
+            data["unified-delay"] = True
+        if "tcp-concurrent" not in data:
+            data["tcp-concurrent"] = True
 
         buf = StringIO()
         yaml.dump(data, buf)
@@ -483,6 +515,7 @@ class YamlManager:
 
         proxies = data.get("proxies") or []
         proxy_groups = data.get("proxy-groups") or []
+        rules = data.get("rules") or []
 
         clean_proxies = [dict(p) for p in proxies if isinstance(p, dict)]
         clean_groups = []
@@ -492,8 +525,11 @@ class YamlManager:
                 g_dict["proxies"] = list(g_dict.get("proxies") or [])
                 clean_groups.append(g_dict)
 
+        clean_rules = [str(r) for r in rules if r] if isinstance(rules, list) else []
+
         return {
             "proxies": clean_proxies,
             "proxy_groups": clean_groups,
-            "rules_count": len(data.get("rules") or [])
+            "rules": clean_rules,
+            "rules_count": len(clean_rules)
         }
