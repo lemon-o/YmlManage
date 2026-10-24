@@ -409,11 +409,36 @@
               }"
               @click="toggleNodeSelection(node.id)"
             >
-              <!-- 顶部：节点名称 + 状态 + 内嵌精巧复选指示器 -->
+              <!-- 顶部：左上角纯国旗 + 节点名称(超长省略+Tooltip) + 状态 + 复选指示器 -->
               <div class="node-card-top-line">
-                <span class="node-title-main" :title="node.name">
-                  {{ node.name }}
-                </span>
+                <div class="node-title-wrapper">
+                  <!-- 左上角国旗 (无外层矩形底色/边框) -->
+                  <span
+                    v-if="getNodeLocation(node, ipLocationMap).code !== 'UN'"
+                    class="node-card-flag"
+                    :title="getNodeLocation(node, ipLocationMap).fullText"
+                  >
+                    <span
+                      v-if="getNodeLocation(node, ipLocationMap).svg"
+                      class="country-flag-svg"
+                      v-html="getNodeLocation(node, ipLocationMap).svg"
+                    ></span>
+                    <span v-else class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
+                  </span>
+
+                  <!-- 节点名称超出省略号 + Tooltip 浮窗提示 -->
+                  <el-tooltip
+                    :content="node.name"
+                    placement="top"
+                    :show-after="300"
+                    :enterable="false"
+                  >
+                    <span class="node-title-main">
+                      {{ node.name }}
+                    </span>
+                  </el-tooltip>
+                </div>
+
                 <div class="card-top-right">
                   <span v-if="node.is_existing" class="tag-in-master">
                     已存在
@@ -425,23 +450,9 @@
                 </div>
               </div>
 
-              <!-- 底部：协议类型 + [速度标记] + [延迟标记] -->
+              <!-- 底部：协议类型 + [延迟标记] -->
               <div class="node-card-bottom-line">
-                <div class="node-proto-wrapper">
-                  <span class="node-proto-label">{{ node.proto_display || node.type }}</span>
-                  <span
-                    v-if="getNodeLocation(node, ipLocationMap).code !== 'UN'"
-                    class="node-loc-flag-badge"
-                    :title="getNodeLocation(node, ipLocationMap).fullText"
-                  >
-                    <span
-                      v-if="getNodeLocation(node, ipLocationMap).svg"
-                      class="country-flag-svg"
-                      v-html="getNodeLocation(node, ipLocationMap).svg"
-                    ></span>
-                    <span v-else class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
-                  </span>
-                </div>
+                <span class="node-proto-label" :title="node.proto_display || node.type">{{ node.proto_display || node.type }}</span>
 
                 <div class="node-metrics-tags">
                   <!-- URL Test 真实延迟标记 (NekoBox 同款) -->
@@ -1025,9 +1036,11 @@
                 </div>
               </div>
 
-              <div class="n-card-title" :title="node.name">
-                {{ node.name }}
-              </div>
+              <el-tooltip :content="node.name" placement="top" :show-after="300" :enterable="false">
+                <div class="n-card-title">
+                  {{ node.name }}
+                </div>
+              </el-tooltip>
 
               <div class="n-card-server">
                 <el-icon class="server-icon"><Connection /></el-icon>
@@ -4540,8 +4553,50 @@ const handleDeleteSource = async (id) => {
   font-weight: 600;
 }
 
+
+.node-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.node-card-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.country-flag-svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 13px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.country-flag-svg svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .node-card-top-line {
   display: flex;
+  min-width: 0;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
