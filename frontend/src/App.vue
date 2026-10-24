@@ -988,7 +988,7 @@
             >
               <div class="n-card-top">
                 <span class="node-protocol-tag" :class="'proto-' + (node.type || 'unknown')">
-                  {{ node.type || 'custom' }}
+                  {{ node.ports ? `${node.type} (跳跃)` : (node.type || 'custom') }}
                 </span>
                 <div class="n-card-actions">
                   <button class="n-icon-btn edit" title="编辑节点" @click="openEditNodeDetail(node)">
@@ -1013,8 +1013,8 @@
 
               <div class="n-card-server">
                 <el-icon class="server-icon"><Connection /></el-icon>
-                <span class="server-text" :title="(node.server || '-') + ':' + (node.port || '-')">
-                  {{ node.server || '-' }}:{{ node.port || '-' }}
+                <span class="server-text" :title="(node.server || '-') + ':' + (node.ports || node.port || '-')">
+                  {{ node.server || '-' }}:{{ node.ports || node.port || '-' }}
                 </span>
               </div>
 
@@ -1197,7 +1197,7 @@
               <el-input v-model="currentNodeForm.server" placeholder="例如: 1.2.3.4" />
             </el-form-item>
             <el-form-item label="端口">
-              <el-input v-model="currentNodeForm.port" placeholder="例如: 443" />
+              <el-input v-model="currentNodeForm.port" placeholder="例如: 443 或 20000-40000 (端口跳跃)" />
             </el-form-item>
           </div>
           <el-form-item label="密码 / UUID / 密钥">
@@ -3723,7 +3723,15 @@ const confirmSaveNode = async () => {
     return
   }
 
-  const cleanNode = { ...f, name: f.name.trim(), server: f.server.trim(), port: parseInt(f.port) || 443 }
+  const cleanNode = { ...f, name: f.name.trim(), server: f.server.trim() }
+  const portStr = String(f.port || '').trim()
+  if (portStr.includes('-') || portStr.includes(',')) {
+    cleanNode.ports = portStr
+    const firstP = parseInt(portStr.split(/[-,\s]/)[0])
+    cleanNode.port = isNaN(firstP) ? 443 : firstP
+  } else {
+    cleanNode.port = parseInt(portStr) || 443
+  }
 
   if (isEditingExistingNode.value) {
     const idx = editorProxies.value.findIndex(p => p.name === oldEditingNodeName)

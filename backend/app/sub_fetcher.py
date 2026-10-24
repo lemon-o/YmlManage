@@ -140,10 +140,17 @@ def parse_vless_link(url: str) -> Optional[Dict[str, Any]]:
         if security == "reality":
             pbk = params.get("pbk", [""])[0]
             sid = params.get("sid", [""])[0]
-            node["reality-opts"] = {
+            spx = params.get("spx", [""])[0]
+            ropts: Dict[str, Any] = {
                 "public-key": pbk,
                 "short-id": sid
             }
+            if spx:
+                ropts["spider-x"] = spx
+            if params.get("support-x25519mlkem768"):
+                val = params.get("support-x25519mlkem768")[0].lower()
+                ropts["support-x25519mlkem768"] = (val in ["1", "true"])
+            node["reality-opts"] = ropts
             if params.get("fp"):
                 node["client-fingerprint"] = params.get("fp")[0]
 
@@ -171,7 +178,7 @@ def parse_trojan_link(url: str) -> Optional[Dict[str, Any]]:
         server = parsed.hostname
         port = parsed.port or 443
         params = urllib.parse.parse_qs(parsed.query)
-        sni = params.get("sni", [""])[0]
+        sni = params.get("sni", [""])[0] or params.get("peer", [""])[0]
 
         node: Dict[str, Any] = {
             "name": name,
@@ -179,33 +186,132 @@ def parse_trojan_link(url: str) -> Optional[Dict[str, Any]]:
             "server": server,
             "port": port,
             "password": password,
-            "udp": True,
-            "sni": sni or server
+            "udp": True
         }
+        if sni:
+            node["sni"] = sni
+        alpn = params.get("alpn", [])
+        if alpn:
+            alpn_list = [x.strip() for item in alpn for x in item.split(",") if x.strip()]
+            if alpn_list:
+                node["alpn"] = alpn_list
+        if params.get("fp"):
+            node["client-fingerprint"] = params.get("fp")[0]
+        allow_insecure = params.get("allowInsecure", [""])[0] or params.get("insecure", [""])[0]
+        if allow_insecure in ["1", "true"]:
+            node["skip-cert-verify"] = True
+
+        net = params.get("type", ["tcp"])[0]
+        if net == "ws":
+            node["network"] = "ws"
+            path = params.get("path", ["/"])[0]
+            host = params.get("host", [""])[0] or sni or server
+            node["ws-opts"] = {"path": path, "headers": {"Host": host}}
+        elif net == "grpc":
+            node["network"] = "grpc"
+            service_name = params.get("serviceName", [""])[0]
+            node["grpc-opts"] = {"grpc-service-name": service_name}
+
         return node
     except Exception:
         return None
 
 
 def parse_hysteria2_link(url: str) -> Optional[Dict[str, Any]]:
-    """解析 hysteria2:// 或 hy2:// 链接为 Mihomo 节点字典"""
+    """解析 hysteria2:// 或 hy2:// 链接为 Mihomo 节点字典，全面支持端口跳跃 (ports / mport) 与 Salamander 混淆"""
     try:
         parsed = urllib.parse.urlparse(url)
         name = urllib.parse.unquote(parsed.fragment) or "Hysteria2"
-        password = parsed.username
-        server = parsed.hostname
-        port = parsed.port or 443
+        
+        # 兼容提取认证密码及主机端口 (解决端口范围导致 urlparse 报 ValueError 的问题)
+        netloc = parsed.netloc
+        password = parsed.username or ""
+        hostport = netloc
+        if "@" in netloc:
+            userinfo, hostport = netloc.rsplit("@", 1)
+            if not password:
+                password = urllib.parse.unquote(userinfo)
+
+        server = hostport
+        port = None
+        ports = None
+
+        if ":" in hostport:
+            server, port_part = hostport.split(":", 1)
+            port_part = port_part.strip()
+            # 识别端口范围或逗号分隔的多端口，如 20000-40000 或 20000,20001
+            if "-" in port_part or "," in port_part:
+                ports = port_part
+                first_p = re.split(r"[-,\s]", ports)[0].strip()
+                if first_p.isdigit():
+                    port = int(first_p)
+            elif port_part.isdigit():
+                port = int(port_part)
+
         params = urllib.parse.parse_qs(parsed.query)
         sni = params.get("sni", [""])[0]
+
+        # 检查 query 参数中的端口跳跃 (mport / ports)
+        query_ports = params.get("mport", [""])[0] or params.get("ports", [""])[0]
+        if query_ports:
+            ports = query_ports.strip()
+            if not port:
+                first_p = re.split(r"[-,\s]", ports)[0].strip()
+                if first_p.isdigit():
+                    port = int(first_p)
+
+        if not port:
+            port = 443
 
         node: Dict[str, Any] = {
             "name": name,
             "type": "hysteria2",
             "server": server,
             "port": port,
-            "password": password,
-            "sni": sni or server
+            "password": password
         }
+
+        # 注入端口跳跃配置
+        if ports:
+            node["ports"] = ports
+
+        # 解析跳跃间隔 hop-interval
+        hop_int = params.get("hop-interval", [""])[0] or params.get("hop_interval", [""])[0]
+        if hop_int:
+            try:
+                node["hop-interval"] = int(hop_int)
+            except Exception:
+                pass
+
+        if sni:
+            node["sni"] = sni
+
+        # 解析混淆参数 (如 obfs=salamander & obfs-password=...)
+        obfs = params.get("obfs", [""])[0]
+        obfs_password = params.get("obfs-password", [""])[0] or params.get("obfs_password", [""])[0]
+        if obfs:
+            node["obfs"] = obfs
+            if obfs_password:
+                node["obfs-password"] = obfs_password
+
+        # 解析 alpn 参数 (如 alpn=h3 或 alpn=h3,h2)
+        alpn = params.get("alpn", [])
+        if alpn:
+            alpn_list = [x.strip() for item in alpn for x in item.split(",") if x.strip()]
+            if alpn_list:
+                node["alpn"] = alpn_list
+
+        # 解析跳过证书验证
+        insecure = params.get("insecure", [""])[0] or params.get("skip-cert-verify", [""])[0]
+        if insecure in ["1", "true"]:
+            node["skip-cert-verify"] = True
+
+        # 解析速率限制参数
+        if params.get("up"):
+            node["up"] = params.get("up")[0]
+        if params.get("down"):
+            node["down"] = params.get("down")[0]
+
         return node
     except Exception:
         return None
@@ -234,6 +340,14 @@ class SubscriptionFetcher:
 
     @classmethod
     async def fetch_and_parse(cls, url: str, custom_ua: Optional[str] = None) -> List[Dict[str, Any]]:
+        url = url.strip()
+        if not url:
+            return []
+
+        # 如果不是 http/https 链接，说明用户直接粘贴了 Base64 密文、单个节点链接或批量节点链接 (如 vmess://, vless://, ss://, hy2:// 等)
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return cls.parse_content(url)
+
         ua = custom_ua or DEFAULT_USER_AGENT
         headers = {
             "User-Agent": ua,

@@ -148,7 +148,9 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                         new_count += 1
 
                     p_type = str(node.get("type", "unknown")).lower()
-                    if node.get("xudp"):
+                    if node.get("ports"):
+                        proto_display = f"{p_type} / 端口跳跃({node.get('ports')})"
+                    elif node.get("xudp"):
                         proto_display = f"{p_type} / xudp"
                     elif node.get("udp"):
                         proto_display = f"{p_type} / udp"
@@ -164,7 +166,7 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                         "type": p_type,
                         "proto_display": proto_display,
                         "server": str(node.get("server", "")),
-                        "port": node.get("port", ""),
+                        "port": str(node.get("ports") or node.get("port") or ""),
                         "delay": node.get("delay", 0),
                         "is_existing": is_existing,
                         "raw": node
@@ -263,7 +265,9 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
             new_count += 1
 
         p_type = str(node.get("type", "unknown")).lower()
-        if node.get("xudp"):
+        if node.get("ports"):
+            proto_display = f"{p_type} / 端口跳跃({node.get('ports')})"
+        elif node.get("xudp"):
             proto_display = f"{p_type} / xudp"
         elif node.get("udp"):
             proto_display = f"{p_type} / udp"
@@ -279,7 +283,7 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
             "type": p_type,
             "proto_display": proto_display,
             "server": str(node.get("server", "")),
-            "port": node.get("port", ""),
+            "port": str(node.get("ports") or node.get("port") or ""),
             "delay": node.get("delay", 0),
             "is_existing": is_existing,
             "raw": node
