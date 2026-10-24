@@ -4,6 +4,8 @@
  * 以及异步 IP/域名 GeoIP 归属地解析与多级缓存
  */
 
+import { getFlagSvg } from './flags.js'
+
 // 1. 常见国旗 Emoji 到国家信息的映射
 export const EMOJI_FLAG_MAP = {
   '🇭🇰': { code: 'HK', flag: '🇭🇰', text: '香港' },
@@ -308,12 +310,21 @@ export function isCloudflare(name = '', server = '') {
  * @returns {{ code: string, flag: string, text: string, fullText: string }}
  */
 export function getNodeLocation(node, ipCache = {}) {
+  const fallback = { code: 'UN', flag: '🌐', text: '未知区域', fullText: '未知区域', svg: getFlagSvg('CF') }
   if (!node) {
-    return { code: 'UN', flag: '🌐', text: '未知区域', fullText: '未知区域' }
+    return fallback
   }
 
   const name = String(node.name || '').trim()
   const server = String(node.server || '').trim()
+
+  const makeRes = (code, flag, text, fullText) => ({
+    code,
+    flag,
+    text,
+    fullText: fullText || `${flag} ${text}`,
+    svg: getFlagSvg(code)
+  })
 
   // 1. 优先检查异步 IP GeoIP 解析结果
   if (server && ipCache && ipCache[server]) {
@@ -321,68 +332,39 @@ export function getNodeLocation(node, ipCache = {}) {
     if (geo && geo.country) {
       const cityPart = geo.city && geo.city !== geo.country ? ` · ${geo.city}` : ''
       const displayText = `${geo.country}${cityPart}`
-      return {
-        code: geo.countryCode || 'IP',
-        flag: geo.flag || '🌐',
-        text: displayText,
-        fullText: `${geo.flag || '🌐'} ${geo.country}${cityPart}`
-      }
+      const cCode = geo.countryCode || 'IP'
+      return makeRes(cCode, geo.flag || '🌐', displayText, `${geo.flag || '🌐'} ${geo.country}${cityPart}`)
     }
   }
 
   // 2. 检查国旗 Emoji
   for (const [flag, info] of Object.entries(EMOJI_FLAG_MAP)) {
     if (name.includes(flag)) {
-      return {
-        code: info.code,
-        flag: info.flag,
-        text: info.text,
-        fullText: `${info.flag} ${info.text}`
-      }
+      return makeRes(info.code, info.flag, info.text, `${info.flag} ${info.text}`)
     }
   }
 
   // 3. 检查常见国家规则匹配（针对节点名称）
   for (const rule of LOCATION_RULES) {
     if (rule.regex.test(name)) {
-      return {
-        code: rule.code,
-        flag: rule.flag,
-        text: rule.text,
-        fullText: `${rule.flag} ${rule.text}`
-      }
+      return makeRes(rule.code, rule.flag, rule.text, `${rule.flag} ${rule.text}`)
     }
   }
 
   // 4. 检查 Cloudflare Anycast IP 段或名称
   if (isCloudflare(name, server)) {
-    return {
-      code: 'CF',
-      flag: '🌐',
-      text: 'Cloudflare Anycast',
-      fullText: '🌐 Cloudflare Anycast'
-    }
+    return makeRes('CF', '🌐', 'Cloudflare Anycast', '🌐 Cloudflare Anycast')
   }
 
   // 5. 检查节点服务器域名中的地域代号 (如 sg07.150239.xyz, hk.node.com)
   if (server) {
     for (const rule of LOCATION_RULES) {
       if (rule.regex.test(server)) {
-        return {
-          code: rule.code,
-          flag: rule.flag,
-          text: rule.text,
-          fullText: `${rule.flag} ${rule.text}`
-        }
+        return makeRes(rule.code, rule.flag, rule.text, `${rule.flag} ${rule.text}`)
       }
     }
   }
 
   // 6. 默认未识别标识
-  return {
-    code: 'UN',
-    flag: '🌐',
-    text: '未知区域',
-    fullText: '🌐 未知区域'
-  }
+  return fallback
 }

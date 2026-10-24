@@ -429,8 +429,17 @@
               <div class="node-card-bottom-line">
                 <div class="node-proto-wrapper">
                   <span class="node-proto-label">{{ node.proto_display || node.type }}</span>
-                  <span v-if="getNodeLocation(node, ipLocationMap).text !== '未知区域'" class="node-loc-badge" :title="getNodeLocation(node, ipLocationMap).fullText">
-                    {{ getNodeLocation(node, ipLocationMap).flag }} {{ getNodeLocation(node, ipLocationMap).text }}
+                  <span
+                    v-if="getNodeLocation(node, ipLocationMap).code !== 'UN'"
+                    class="node-loc-flag-badge"
+                    :title="getNodeLocation(node, ipLocationMap).fullText"
+                  >
+                    <span
+                      v-if="getNodeLocation(node, ipLocationMap).svg"
+                      class="country-flag-svg"
+                      v-html="getNodeLocation(node, ipLocationMap).svg"
+                    ></span>
+                    <span v-else class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
                   </span>
                 </div>
 
@@ -1030,7 +1039,12 @@
               <!-- 节点国家/区域 (在 IP/域名下一行显示) -->
               <div class="n-card-location">
                 <el-icon class="loc-icon"><Location /></el-icon>
-                <span class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
+                <span
+                  v-if="getNodeLocation(node, ipLocationMap).svg"
+                  class="country-flag-svg"
+                  v-html="getNodeLocation(node, ipLocationMap).svg"
+                ></span>
+                <span v-else class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
                 <span class="loc-text" :title="getNodeLocation(node, ipLocationMap).fullText">
                   {{ getNodeLocation(node, ipLocationMap).text }}
                 </span>
@@ -4590,6 +4604,7 @@ const handleDeleteSource = async (id) => {
   border-radius: 4px;
   border: none;
   line-height: 1.4;
+  white-space: nowrap;
 }
 
 .delay-fast {
@@ -6901,6 +6916,44 @@ const handleDeleteSource = async (id) => {
   text-overflow: ellipsis;
 }
 
+
+.country-flag-svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.country-flag-svg svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.node-loc-flag-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.xui-node-card.card-selected .node-loc-flag-badge {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.3);
+}
 .node-proto-wrapper {
   display: flex;
   align-items: center;
