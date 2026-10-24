@@ -77,8 +77,6 @@ export const fetchNodesStream = (data, signal) => {
     signal
   })
 }
-export const speedtestNode = (data) => api.post('/nodes/speedtest-node', data)
-export const stopSpeedTest = () => api.post('/nodes/speedtest-stop')
 export const importNodes = (data) => api.post('/nodes/import', data)
 
 // 测速与测延迟接口相关 API

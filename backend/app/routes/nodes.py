@@ -9,11 +9,7 @@ from pydantic import BaseModel, Field
 from ..config import DEFAULT_TEST_URL
 from ..yaml_manager import YamlManager
 from ..sub_fetcher import SubscriptionFetcher
-from ..node_tester import (
-    test_and_filter_nodes_session,
-    speedtest_single_proxy,
-    stop_mihomo_session
-)
+from ..node_tester import test_and_filter_nodes_session
 
 router = APIRouter(prefix="/api/nodes", tags=["Nodes"])
 
@@ -24,13 +20,6 @@ class FetchNodesRequest(BaseModel):
     custom_ua: Optional[str] = Field(default=None, description="自定义 User-Agent")
     filter_dead: Optional[bool] = Field(default=True, description="是否自动剔除没有延迟的节点")
     test_url: Optional[str] = Field(default=None, description="自定义测速/测延迟接口 URL")
-
-
-class SpeedTestNodeRequest(BaseModel):
-    node_id: str = Field(..., description="卡片节点 ID")
-    proxy_key: Optional[str] = Field(default=None, description="在 Mihomo 会话中的代理 key")
-    node: Optional[Dict[str, Any]] = Field(default=None, description="原始节点数据，用于独立测试")
-    download_url: Optional[str] = Field(default=None, description="测速下载测试 URL")
 
 
 class ImportNodesRequest(BaseModel):
@@ -171,9 +160,6 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                         "server": str(node.get("server", "")),
                         "port": node.get("port", ""),
                         "delay": node.get("delay", 0),
-                        "speed": None,
-                        "speed_display": "--",
-                        "speed_status": "ready",
                         "is_existing": is_existing,
                         "raw": node
                     })
@@ -289,9 +275,6 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
             "server": str(node.get("server", "")),
             "port": node.get("port", ""),
             "delay": node.get("delay", 0),
-            "speed": None,
-            "speed_display": "--",
-            "speed_status": "ready",
             "is_existing": is_existing,
             "raw": node
         })
@@ -305,42 +288,6 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
         "nodes": processed_nodes,
         "available_groups": available_groups
     }
-
-
-@router.post("/speedtest-node")
-async def speedtest_single_card(req: SpeedTestNodeRequest):
-    """
-    单张卡片节点真实测速，测试其带宽并返回 MB/s
-    """
-    try:
-        speed, speed_display = await speedtest_single_proxy(
-            proxy_key=req.proxy_key,
-            node_dict=req.node,
-            download_url=req.download_url
-        )
-        return {
-            "node_id": req.node_id,
-            "speed": speed,
-            "speed_display": speed_display,
-            "status": "success"
-        }
-    except Exception as e:
-        return {
-            "node_id": req.node_id,
-            "speed": 0.0,
-            "speed_display": "0.0 MB/s",
-            "status": "error",
-            "error": str(e)
-        }
-
-
-@router.post("/speedtest-stop")
-def stop_speedtesting():
-    """
-    停止卡片测速并释放内核测试资源
-    """
-    stop_mihomo_session()
-    return {"status": "stopped"}
 
 
 @router.post("/import")

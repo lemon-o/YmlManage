@@ -21,31 +21,31 @@ DEFAULT_USER_AGENT = os.environ.get(
     "Clash.Meta; ClashVerge/1.7.7; Clash/1.18.0"
 )
 
-# 默认测速与测延迟接口 (默认选用全球 Anycast 直连的 Cloudflare 204，国内外均畅通且不阻断海外节点)
+# 默认 URL Test 延迟测试接口 (对标 NekoBox 逻辑，默认选用全球 Anycast 直连的 Cloudflare 204)
 DEFAULT_TEST_URL = os.environ.get(
     "DEFAULT_TEST_URL",
     "http://cp.cloudflare.com/generate_204"
 )
 
-# 常用国内直连与国际测速/延迟测试接口候选列表
+# 常用 URL Test 延迟测试接口候选列表 (支持国内与海外主流探针)
 DOMESTIC_TEST_URLS = [
     {
         "id": "cloudflare",
-        "name": "Cloudflare 204 (全球 Anycast / 推荐)",
+        "name": "Cloudflare 204 (NekoBox 推荐 / 全球)",
         "url": "http://cp.cloudflare.com/generate_204",
-        "desc": "Cloudflare Anycast 全球 204，国内直连畅通，绝不阻断海外出站节点"
+        "desc": "Cloudflare Anycast 全球 204，国内直连畅通，海外出站极速响应 (NekoBox 首选)"
     },
     {
         "id": "google",
-        "name": "Google 204 (Clash 原版 / 推荐)",
+        "name": "Google 204 (NekoBox 标准 / 原版)",
         "url": "http://www.gstatic.com/generate_204",
-        "desc": "Clash 原版默认测速接口，海外节点延迟极低且精准"
+        "desc": "Google 官方 204 探针，NekoBox / Clash 原生标准，海外节点精准 RTT"
     },
     {
         "id": "apple",
-        "name": "Apple 204 (全球直连 / 稳定)",
+        "name": "Apple 204 (全球 Anycast 直连)",
         "url": "http://captive.apple.com/generate_204",
-        "desc": "苹果官方连通测试，返回 204，国内国外均直连可通"
+        "desc": "苹果官方网络连通探测接口，全球毫秒级响应，国内国外均畅通"
     },
     {
         "id": "microsoft",
@@ -55,21 +55,21 @@ DOMESTIC_TEST_URLS = [
     },
     {
         "id": "miui",
-        "name": "小米 MIUI 204 (仅限国内直连)",
+        "name": "小米 MIUI 204 (国内内网直连)",
         "url": "http://connect.rom.miui.com/generate_204",
-        "desc": "国内三网 CDN，注意：小米防火墙会直接阻断海外机房节点出站请求"
+        "desc": "国内三网 CDN，注意：海外节点访问属出境再回国线路，延迟会偏高"
     },
     {
         "id": "huawei",
-        "name": "华为 HiCloud 204 (仅限国内直连)",
+        "name": "华为 HiCloud 204 (国内内网直连)",
         "url": "http://connectivitycheck.platform.hicloud.com/generate_204",
-        "desc": "华为云连通性检测，注意：海外机房节点出站通常会被拒"
+        "desc": "华为云国内连通性检测，海外节点访问延迟偏高"
     },
     {
         "id": "vivo",
-        "name": "vivo 204 (仅限国内直连)",
+        "name": "vivo 204 (国内内网直连)",
         "url": "http://wifi.vivo.com.cn/generate_204",
-        "desc": "vivo 官方连通性探测，注意：海外机房节点出站通常会被拒"
+        "desc": "vivo 官方连通性探测，海外节点访问延迟偏高"
     }
 ]
 

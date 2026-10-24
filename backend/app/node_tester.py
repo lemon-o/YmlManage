@@ -291,78 +291,6 @@ class MihomoSession:
         alive.sort(key=lambda x: (1 if x.get("delay", -1) <= 0 else 0, x.get("delay", 99999)))
         return alive
 
-    async def test_single_node_speed(
-        self,
-        proxy_key: Optional[str] = None,
-        node_dict: Optional[Dict[str, Any]] = None,
-        download_url: Optional[str] = None,
-        max_duration: float = 2.5
-    ) -> Tuple[float, str]:
-        """
-        测试单节点真实下载带宽测速 (MB/s)
-        优化：剔除 TCP 与 TLS 握手开销，从首块有效数据包到达时开始计时，更真实反映节点的实际吞吐速率
-        """
-        self.last_active = time.time()
-
-        if not self.is_alive():
-            if node_dict:
-                ok = await self.start([node_dict])
-                if ok and self.proxy_keys:
-                    proxy_key = self.proxy_keys[0]
-            if not self.is_alive():
-                return 0.0, "0.0 MB/s"
-
-        api_base = f"http://127.0.0.1:{self.ext_port}"
-
-        # 切换 GLOBAL 代理到该节点
-        if proxy_key:
-            try:
-                async with httpx.AsyncClient(timeout=1.5) as client:
-                    await client.put(f"{api_base}/proxies/GLOBAL", json={"name": proxy_key})
-            except Exception:
-                pass
-
-        # 发起 HTTP 请求测试下载带宽
-        proxy_url = f"http://127.0.0.1:{self.mixed_port}"
-
-        test_targets = []
-        if download_url and download_url.strip():
-            test_targets.append(download_url.strip())
-        test_targets.extend([
-            "https://speed.cloudflare.com/__down?bytes=20000000",
-            "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
-        ])
-
-        for u in test_targets:
-            total_bytes = 0
-            t_transfer_start = None
-            try:
-                async with httpx.AsyncClient(proxy=proxy_url, timeout=max_duration + 3.0, verify=False) as client:
-                    async with client.stream("GET", u) as resp:
-                        if resp.status_code == 200:
-                            async for chunk in resp.aiter_bytes(chunk_size=65536):
-                                now = time.time()
-                                if t_transfer_start is None:
-                                    t_transfer_start = now  # 从收到第一块数据时启动计时
-                                total_bytes += len(chunk)
-                                if (now - t_transfer_start) >= max_duration:
-                                    break
-                if total_bytes > 0 and t_transfer_start is not None:
-                    elapsed = max(0.1, time.time() - t_transfer_start)
-                    mb_s = (total_bytes / elapsed) / (1024 * 1024)
-                    if mb_s >= 1.0:
-                        display = f"{mb_s:.1f} MB/s"
-                    elif mb_s > 0:
-                        kb_s = mb_s * 1024
-                        display = f"{int(kb_s)} KB/s"
-                    else:
-                        display = "0.0 MB/s"
-                    return round(mb_s, 2), display
-            except Exception:
-                pass
-
-        return 0.0, "0.0 MB/s"
-
 
 # 全局内核测试会话单例
 session_manager = MihomoSession()
@@ -377,7 +305,9 @@ async def test_and_filter_nodes(
     on_progress: Optional[Any] = None
 ) -> List[Dict[str, Any]]:
     """
-    使用内置 Mihomo 内核执行真实延迟测试与节点过滤，支持进度回调
+    使用内置 Mihomo 官方内核执行对标 NekoBox 逻辑的 URL Test 真实延迟探测与死节点过滤。
+    通过节点并发发起轻量 HTTP GET 204/200 探针请求，精确测量首字节响应时延 (TTFB / RTT)。
+    支持实时进度回调，测试完毕立即自动清理释放内核资源。
     """
     if not nodes:
         return []
@@ -385,14 +315,17 @@ async def test_and_filter_nodes(
     if MIHOMO_PATH.exists():
         started = await session_manager.start(nodes)
         if started:
-            alive = await session_manager.test_delays(
-                test_url=test_url,
-                timeout=timeout,
-                concurrency=concurrency,
-                filter_dead=filter_dead,
-                on_progress=on_progress
-            )
-            return alive
+            try:
+                alive = await session_manager.test_delays(
+                    test_url=test_url,
+                    timeout=timeout,
+                    concurrency=concurrency,
+                    filter_dead=filter_dead,
+                    on_progress=on_progress
+                )
+                return alive
+            finally:
+                session_manager.stop()
 
     # 回退备用：若无内核，标记为未测试
     alive = []
@@ -405,21 +338,6 @@ async def test_and_filter_nodes(
 
 # 兼容别名
 test_and_filter_nodes_session = test_and_filter_nodes
-
-
-async def speedtest_single_proxy(
-    proxy_key: Optional[str] = None,
-    node_dict: Optional[Dict[str, Any]] = None,
-    download_url: Optional[str] = None
-) -> Tuple[float, str]:
-    """
-    单张卡片节点测速
-    """
-    return await session_manager.test_single_node_speed(
-        proxy_key=proxy_key,
-        node_dict=node_dict,
-        download_url=download_url
-    )
 
 
 def stop_mihomo_session():

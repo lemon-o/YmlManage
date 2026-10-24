@@ -190,15 +190,15 @@
       <section class="xui-card-panel">
         <div class="panel-head-bar">
           <div class="panel-head-title-flex">
-            <span class="panel-head-title">提取外部订阅节点并真实测速</span>
+            <span class="panel-head-title">提取外部订阅节点并进行 URL Test 延迟测试</span>
           </div>
 
           <div class="panel-head-right" style="display: flex; align-items: center; gap: 16px;">
             <div class="test-url-selector-wrap" style="display: flex; align-items: center;">
-              <span class="quick-src-label">测速接口:</span>
+              <span class="quick-src-label">URL Test 接口:</span>
               <el-select
                 v-model="activeTestUrl"
-                placeholder="选取测速接口"
+                placeholder="选取 URL Test 接口"
                 size="small"
                 style="width: 220px"
                 @change="handleTestUrlChange"
@@ -264,7 +264,7 @@
               @click="handleFetchNodes"
             >
               <el-icon :class="{ 'is-loading': fetching }"><Search /></el-icon>
-              <span>{{ fetching ? '测速分析中...' : '提取节点' }}</span>
+              <span>{{ fetching ? 'URL Testing...' : '提取并测试' }}</span>
             </button>
           </div>
 
@@ -316,7 +316,7 @@
               <el-icon color="#3fb950"><CircleCheck /></el-icon>
             </div>
             <div class="m-val text-green">{{ fetchedNodes.length }} <span class="m-unit">可用</span></div>
-            <div class="m-sub">经 Mihomo 内核真实测速存活</div>
+            <div class="m-sub">经 NekoBox 同款 URL Test 验证存活</div>
           </div>
 
           <div
@@ -343,44 +343,24 @@
             <span>有效节点卡片池</span>
             <span class="panel-num-pill">{{ filteredNodes.length }}</span>
 
-            <!-- 逐张卡片测速状态指示器 -->
-            <div class="speedtest-status-pill" v-if="isSpeedTesting">
-              <el-icon class="is-loading" :size="12" style="color: #38bdf8;"><Loading /></el-icon>
-              <span class="st-text">卡片测速中: {{ speedTestProgress.current }} / {{ speedTestProgress.total }}</span>
-              <button class="st-stop-btn" @click="handleStopSpeedTest" title="停止测速">停止</button>
-            </div>
-            <div class="speedtest-status-pill done" v-else-if="speedTestProgress.finished && speedTestProgress.total > 0">
-              <el-icon :size="12" style="color: #4ade80;"><CircleCheck /></el-icon>
-              <span class="st-text">测速已完成</span>
-              <button class="st-stop-btn" @click="restartSpeedTest" title="重新测速">重测</button>
-            </div>
-            <div class="speedtest-status-pill paused" v-else-if="speedTestProgress.stopped">
-              <span class="st-text">测速已暂停</span>
-              <button class="st-stop-btn" @click="restartSpeedTest" title="继续测速">继续</button>
-            </div>
+
           </div>
 
           <div class="panel-head-actions">
-            <!-- 排序切换按钮组 (延迟低 / 速度快排在前面) -->
+            <!-- 排序切换按钮组 (延迟优先 / 默认顺序) -->
             <div class="xui-mini-btn-group">
-              <button
-                class="m-btn"
-                :class="{ 'm-btn-active': sortMode === 'smart' }"
-                @click="setSortMode('smart')"
-                title="综合优选：延迟低且速度快排在前面"
-              >综合优选</button>
-              <button
-                class="m-btn"
-                :class="{ 'm-btn-active': sortMode === 'speed' }"
-                @click="setSortMode('speed')"
-                title="速度优先：测速由高到低排序"
-              >速度优先</button>
               <button
                 class="m-btn"
                 :class="{ 'm-btn-active': sortMode === 'delay' }"
                 @click="setSortMode('delay')"
-                title="延迟优先：延迟由低到高排序"
+                title="延迟优先：按 URL Test 延迟由低到高排序"
               >延迟优先</button>
+              <button
+                class="m-btn"
+                :class="{ 'm-btn-active': sortMode === 'default' }"
+                @click="setSortMode('default')"
+                title="默认排序：保持订阅原始顺序"
+              >默认顺序</button>
             </div>
 
             <el-input
@@ -446,18 +426,7 @@
                 <span class="node-proto-label">{{ node.proto_display || node.type }}</span>
 
                 <div class="node-metrics-tags">
-                  <!-- 速度药丸标记 -->
-                  <span
-                    class="node-speed-pill"
-                    :class="getSpeedClass(node)"
-                  >
-                    <el-icon v-if="node.speed_status === 'testing'" class="is-loading" :size="10" style="margin-right: 3px;">
-                      <Loading />
-                    </el-icon>
-                    <span>{{ formatSpeedDisplay(node) }}</span>
-                  </span>
-
-                  <!-- 真实延迟药丸标记 -->
+                  <!-- URL Test 真实延迟标记 (NekoBox 同款) -->
                   <span
                     class="node-delay-pill"
                     :class="getDelayClass(node.delay)"
@@ -481,7 +450,7 @@
           <el-icon :size="26" color="#58a6ff"><Connection /></el-icon>
         </div>
         <h3 class="guide-title">等待提取节点</h3>
-        <p class="guide-desc">粘贴外部订阅链接并点击「提取节点」，系统将自动完成测速并在卡片中展示速度与延迟</p>
+        <p class="guide-desc">粘贴外部订阅链接并点击「提取节点」，系统将自动执行 URL Test 探测延迟并精准剔除死节点</p>
       </div>
         </div>
       </div>
@@ -1457,7 +1426,7 @@
               <el-icon v-if="fetchProgressData.step >= 4" :size="12"><Check /></el-icon>
               <span v-else>4</span>
             </span>
-            <span class="step-text">卡片池就绪，开启逐张动态测速</span>
+            <span class="step-text">卡片池就绪，完成 URL Test 延迟测定</span>
           </div>
         </div>
       </div>
@@ -1934,10 +1903,7 @@ const existingCount = ref(0)
 const searchKeyword = ref('')
 const selectedNodeIds = ref([])
 
-// 逐张卡片动态测速状态
-const isSpeedTesting = ref(false)
-const speedTestProgress = ref({ current: 0, total: 0, finished: false, stopped: false })
-const activeSpeedTestingId = ref(null)
+
 
 // 提取节点进度弹窗状态
 const fetchProgressVisible = ref(false)
@@ -1985,7 +1951,6 @@ const finishFetchAndCloseDialog = () => {
   }
   fetchProgressVisible.value = false
   selectOnlyNew()
-  startSequentialSpeedTest()
 }
 
 // 导入抽屉与持久化
@@ -2692,104 +2657,6 @@ const pasteFromClipboard = async () => {
   }
 }
 
-let speedTestRunId = 0
-
-const startSequentialSpeedTest = async () => {
-  if (fetchedNodes.value.length === 0) return
-
-  const currentRun = ++speedTestRunId
-  isSpeedTesting.value = true
-  speedTestProgress.value = {
-    current: 0,
-    total: fetchedNodes.value.length,
-    finished: false,
-    stopped: false
-  }
-
-  for (let i = 0; i < fetchedNodes.value.length; i++) {
-    // 检查是否被终止或被新的提取打断
-    if (currentRun !== speedTestRunId || !isSpeedTesting.value) {
-      speedTestProgress.value.stopped = true
-      break
-    }
-
-    const node = fetchedNodes.value[i]
-    node.speed_status = 'testing'
-    activeSpeedTestingId.value = node.id
-    speedTestProgress.value.current = i + 1
-
-    try {
-      const res = await api.speedtestNode({
-        node_id: node.id,
-        proxy_key: node.proxy_key,
-        node: node.raw
-      })
-
-      if (currentRun === speedTestRunId) {
-        node.speed = res.data.speed ?? 0
-        node.speed_display = res.data.speed_display || (node.speed + " MB/s")
-        node.speed_status = 'done'
-      }
-    } catch (e) {
-      console.error('卡片测速异常:', node.name, e)
-      if (currentRun === speedTestRunId) {
-        node.speed = 0
-        node.speed_display = '0.0 MB/s'
-        node.speed_status = 'done'
-      }
-    }
-  }
-
-  if (currentRun === speedTestRunId) {
-    isSpeedTesting.value = false
-    activeSpeedTestingId.value = null
-    if (!speedTestProgress.value.stopped) {
-      speedTestProgress.value.finished = true
-    }
-  }
-}
-
-const handleStopSpeedTest = () => {
-  speedTestRunId++
-  isSpeedTesting.value = false
-  activeSpeedTestingId.value = null
-  speedTestProgress.value.stopped = true
-  api.stopSpeedTest().catch(() => {})
-}
-
-const restartSpeedTest = () => {
-  for (const n of fetchedNodes.value) {
-    n.speed_status = 'ready'
-    n.speed = null
-    n.speed_display = '--'
-  }
-  startSequentialSpeedTest()
-}
-
-const formatSpeedDisplay = (node) => {
-  if (node.speed_status === 'testing') {
-    return '测速中...'
-  }
-  if (node.speed_status === 'done' && node.speed_display) {
-    return node.speed_display
-  }
-  return '--'
-}
-
-const getSpeedClass = (node) => {
-  if (node.speed_status === 'testing') {
-    return 'speed-testing'
-  }
-  if (node.speed_status !== 'done') {
-    return 'speed-untested'
-  }
-  const s = node.speed || 0
-  if (s >= 5.0) return 'speed-blazing'
-  if (s >= 1.0) return 'speed-fast'
-  if (s > 0) return 'speed-normal'
-  return 'speed-slow'
-}
-
 const handleFetchNodes = async () => {
   if (!fetchUrl.value.trim()) {
     ElMessage.warning('请输入外部订阅链接')
@@ -2800,10 +2667,7 @@ const handleFetchNodes = async () => {
     return
   }
 
-  // 若之前有测速在运行，先终止
-  if (isSpeedTesting.value) {
-    handleStopSpeedTest()
-  }
+
 
   fetching.value = true
   fetchProgressVisible.value = true
@@ -2888,7 +2752,7 @@ const handleFetchNodes = async () => {
       if (fetchedNodes.value.length === 0) {
         ElMessage.warning('未提取到有效节点（可能全不可达或超时）')
       } else {
-        // 提取成功后 1 秒平滑自动关闭弹窗并进入卡片池，开始逐张测速
+        // 提取与 URL Test 完成后 1 秒平滑自动关闭弹窗并进入卡片池
         fetchAutoCloseTimer = setTimeout(() => {
           if (fetchProgressVisible.value && fetchProgressData.value.isDone) {
             finishFetchAndCloseDialog()
@@ -2907,7 +2771,7 @@ const handleFetchNodes = async () => {
 }
 
 
-const sortMode = ref('smart') // 'smart' 综合优选 | 'speed' 速度优先 | 'delay' 延迟优先
+const sortMode = ref('delay') // 'delay' 延迟优先 | 'default' 默认排序
 
 const setSortMode = (mode) => {
   sortMode.value = mode
@@ -2915,40 +2779,14 @@ const setSortMode = (mode) => {
 
 const sortNodesList = (list, mode) => {
   const arr = [...list]
+  if (mode === 'default') {
+    return arr
+  }
+  // 延迟优先：URL Test 延迟低的排在前面，超时排在最后
   arr.sort((a, b) => {
-    const aSpeed = a.speed != null ? a.speed : -1
-    const bSpeed = b.speed != null ? b.speed : -1
-    const aDelay = a.delay > 0 ? a.delay : 99999
-    const bDelay = b.delay > 0 ? b.delay : 99999
-
-    if (mode === 'speed') {
-      // 速度优先：速度快的排在前面；速度相同时，延迟低的排在前面
-      if (aSpeed !== bSpeed) {
-        return bSpeed - aSpeed
-      }
-      return aDelay - bDelay
-    } else if (mode === 'delay') {
-      // 延迟优先：延迟低的排在前面；延迟相同时，速度快的排在前面
-      if (aDelay !== bDelay) {
-        return aDelay - bDelay
-      }
-      return bSpeed - aSpeed
-    } else {
-      // 综合优选 (smart)：兼顾延迟低与速度快
-      if (aSpeed >= 0 && bSpeed >= 0) {
-        // 综合得分 = 速度(KB/s) / sqrt(延迟)，速度越快、延迟越低，综合排位越靠前
-        const scoreA = ((aSpeed * 1024) + 1) / Math.sqrt(Math.max(30, aDelay))
-        const scoreB = ((bSpeed * 1024) + 1) / Math.sqrt(Math.max(30, bDelay))
-        if (Math.abs(scoreA - scoreB) > 0.05) {
-          return scoreB - scoreA
-        }
-      } else if (aSpeed >= 0 && bSpeed < 0) {
-        return -1
-      } else if (bSpeed >= 0 && aSpeed < 0) {
-        return 1
-      }
-      return aDelay - bDelay
-    }
+    const aDelay = a.delay > 0 ? a.delay : 999999
+    const bDelay = b.delay > 0 ? b.delay : 999999
+    return aDelay - bDelay
   })
   return arr
 }
@@ -4048,94 +3886,6 @@ const handleDeleteSource = async (id) => {
 }
 
 /* 速度标签 (无边框硬线，4px微圆角，与卡片沉稳融合) */
-.node-speed-pill {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 4px;
-  border: none;
-  line-height: 1.4;
-  display: inline-flex;
-  align-items: center;
-  transition: all 0.2s ease;
-}
-
-.speed-untested {
-  background: rgba(100, 116, 139, 0.1);
-  color: #64748b;
-}
-
-.speed-testing {
-  background: rgba(56, 189, 248, 0.14);
-  color: #38bdf8;
-  animation: pulse-testing 1.4s ease-in-out infinite;
-}
-
-@keyframes pulse-testing {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.speed-blazing {
-  background: rgba(56, 189, 248, 0.14);
-  color: #38bdf8;
-}
-
-.speed-fast {
-  background: rgba(74, 222, 128, 0.14);
-  color: #4ade80;
-}
-
-.speed-normal {
-  background: rgba(125, 211, 252, 0.12);
-  color: #7dd3fc;
-}
-
-.speed-slow {
-  background: rgba(148, 163, 184, 0.08);
-  color: #94a3b8;
-}
-
-/* 顶部测速进度提示胶囊 (完全融入 3X-UI 风格) */
-.speedtest-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: #1a1b1f;
-  border: 1px solid #2e323b;
-  border-radius: 12px;
-  padding: 2px 9px;
-  font-size: 11px;
-  color: #8b949e;
-}
-
-.speedtest-status-pill .st-text {
-  color: #cbd5e1;
-}
-
-.speedtest-status-pill .st-stop-btn {
-  background: transparent;
-  border: none;
-  color: #58a6ff;
-  font-size: 11px;
-  cursor: pointer;
-  padding: 0 2px;
-  text-decoration: underline;
-}
-
-.speedtest-status-pill .st-stop-btn:hover {
-  color: #79c0ff;
-}
-
-.speedtest-status-pill.done {
-  border-color: rgba(74, 222, 128, 0.3);
-}
-
-.speedtest-status-pill.paused {
-  border-color: rgba(245, 158, 11, 0.3);
-}
-
-/* 延迟标签 (无边框硬线，柔和纯净微透明色调) */
 .node-delay-pill {
   font-size: 11px;
   font-weight: 500;
