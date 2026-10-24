@@ -289,7 +289,11 @@
       <div class="xui-workspace-split" :class="{ 'is-empty-nodes': !hasFetched || filteredNodes.length === 0 }">
         <!-- 左侧：四张指标卡片 -->
         <aside class="xui-metrics-sidebar" :class="{ 'is-empty-nodes': !hasFetched || filteredNodes.length === 0 }">
-          <div class="xui-metric-box">
+          <div
+            class="xui-metric-box clickable-metric"
+            @click="handleOpenCurrentProfileGroups"
+            title="点击进入当前母本的策略组管理"
+          >
             <div class="metric-top">
               <span class="m-title">当前母本</span>
               <el-icon color="#58a6ff"><Files /></el-icon>
@@ -423,7 +427,12 @@
 
               <!-- 底部：协议类型 + [速度标记] + [延迟标记] -->
               <div class="node-card-bottom-line">
-                <span class="node-proto-label">{{ node.proto_display || node.type }}</span>
+                <div class="node-proto-wrapper">
+                  <span class="node-proto-label">{{ node.proto_display || node.type }}</span>
+                  <span v-if="getNodeLocation(node, ipLocationMap).text !== '未知区域'" class="node-loc-badge" :title="getNodeLocation(node, ipLocationMap).fullText">
+                    {{ getNodeLocation(node, ipLocationMap).flag }} {{ getNodeLocation(node, ipLocationMap).text }}
+                  </span>
+                </div>
 
                 <div class="node-metrics-tags">
                   <!-- URL Test 真实延迟标记 (NekoBox 同款) -->
@@ -1015,6 +1024,15 @@
                 <el-icon class="server-icon"><Connection /></el-icon>
                 <span class="server-text" :title="(node.server || '-') + ':' + (node.ports || node.port || '-')">
                   {{ node.server || '-' }}:{{ node.ports || node.port || '-' }}
+                </span>
+              </div>
+
+              <!-- 节点国家/区域 (在 IP/域名下一行显示) -->
+              <div class="n-card-location">
+                <el-icon class="loc-icon"><Location /></el-icon>
+                <span class="loc-flag">{{ getNodeLocation(node, ipLocationMap).flag }}</span>
+                <span class="loc-text" :title="getNodeLocation(node, ipLocationMap).fullText">
+                  {{ getNodeLocation(node, ipLocationMap).text }}
                 </span>
               </div>
 
@@ -1844,9 +1862,10 @@ import {
   Folder, Collection, Download, Search,
   Upload, Check, Plus, UploadFilled,
   DocumentCopy, Connection, Files, CircleCheck, CircleClose, Loading, Link,
-  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer
+  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer, Location
 } from '@element-plus/icons-vue'
 import * as api from './api'
+import { getNodeLocation } from './utils/location'
 
 // 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
 const authStatus = ref({
@@ -2020,6 +2039,33 @@ const totalRawCount = ref(0)
 const filteredCount = ref(0)
 const newCount = ref(0)
 const existingCount = ref(0)
+const ipLocationMap = ref({})
+
+const resolveMissingLocations = async (nodes = []) => {
+  if (!nodes || nodes.length === 0) return
+  const unknownServers = new Set()
+  for (const n of nodes) {
+    if (!n) continue
+    const loc = getNodeLocation(n, ipLocationMap.value)
+    if (loc.code === 'UN' && n.server) {
+      unknownServers.add(String(n.server).trim())
+    }
+  }
+  const toQuery = Array.from(unknownServers).filter(s => s && !ipLocationMap.value[s])
+  if (toQuery.length === 0) return
+
+  try {
+    const res = await api.lookupIpLocations(toQuery)
+    if (res && res.data && res.data.data) {
+      ipLocationMap.value = {
+        ...ipLocationMap.value,
+        ...res.data.data
+      }
+    }
+  } catch (err) {
+    // 忽略异步网络归属地查询异常
+  }
+}
 
 const searchKeyword = ref('')
 const selectedNodeIds = ref([])
@@ -2436,12 +2482,17 @@ const filteredEditorGroups = computed(() => {
 const filteredEditorProxies = computed(() => {
   const q = proxySearchQuery.value.trim().toLowerCase()
   if (!q) return editorProxies.value
-  return editorProxies.value.filter(p =>
-    (p.name || '').toLowerCase().includes(q) ||
-    (p.type || '').toLowerCase().includes(q) ||
-    String(p.server || '').toLowerCase().includes(q) ||
-    String(p.port || '').includes(q)
-  )
+  return editorProxies.value.filter(p => {
+    const loc = getNodeLocation(p, ipLocationMap.value)
+    return (
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.type || '').toLowerCase().includes(q) ||
+      String(p.server || '').toLowerCase().includes(q) ||
+      String(p.port || '').includes(q) ||
+      (loc.text && loc.text.toLowerCase().includes(q)) ||
+      (loc.flag && loc.flag.includes(q))
+    )
+  })
 })
 
 // 代理节点类型映射表（快速查询协议用于渲染标签）
@@ -3040,10 +3091,12 @@ const copyLanUrl = async () => {
 }
 
 const initAppContent = async () => {
-  await loadSystemInfo()
-  await loadTestUrls()
-  await loadProfiles()
-  await loadSources()
+  await Promise.allSettled([
+    loadSystemInfo(),
+    loadTestUrls(),
+    loadProfiles(),
+    loadSources()
+  ])
 }
 
 onMounted(async () => {
@@ -3204,6 +3257,7 @@ const handleFetchNodes = async () => {
       totalRawCount.value = finalResult.total_raw || 0
       filteredCount.value = finalResult.filtered_count || 0
       fetchedNodes.value = finalResult.nodes || []
+      resolveMissingLocations(fetchedNodes.value)
       newCount.value = finalResult.new_count || 0
       existingCount.value = finalResult.existing_count || 0
       currentGroups.value = finalResult.available_groups || []
@@ -3256,11 +3310,16 @@ const filteredNodes = computed(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
   let list = fetchedNodes.value
   if (kw) {
-    list = list.filter(n =>
-      n.name.toLowerCase().includes(kw) ||
-      n.type.toLowerCase().includes(kw) ||
-      n.server.toLowerCase().includes(kw)
-    )
+    list = list.filter(n => {
+      const loc = getNodeLocation(n, ipLocationMap.value)
+      return (
+        n.name.toLowerCase().includes(kw) ||
+        n.type.toLowerCase().includes(kw) ||
+        (n.server && n.server.toLowerCase().includes(kw)) ||
+        (loc.text && loc.text.toLowerCase().includes(kw)) ||
+        (loc.flag && loc.flag.includes(kw))
+      )
+    })
   }
   return sortNodesList(list, sortMode.value)
 })
@@ -3447,6 +3506,7 @@ const openProfileEditor = async (name) => {
   try {
     const res = await api.getProfileStructure(name)
     editorProxies.value = res.data.proxies || []
+    resolveMissingLocations(editorProxies.value)
     editorGroups.value = res.data.proxy_groups || []
     editorRules.value = res.data.rules || []
     editorRulesCount.value = res.data.rules_count || 0
@@ -3460,6 +3520,14 @@ const openProfileEditor = async (name) => {
   } finally {
     loadingEditorData.value = false
   }
+}
+
+const handleOpenCurrentProfileGroups = () => {
+  if (!currentProfile.value) {
+    ElMessage.warning('当前未载入任何母本配置')
+    return
+  }
+  openProfileEditor(currentProfile.value)
 }
 
 const openYamlEditor = (name) => {
@@ -3850,6 +3918,7 @@ const switchEditorTab = async (tab) => {
     try {
       const res = await api.parseYamlText(rawYamlContent.value)
       editorProxies.value = res.data.proxies || []
+    resolveMissingLocations(editorProxies.value)
       editorGroups.value = res.data.proxy_groups || []
       if (res.data.rules) editorRules.value = res.data.rules
       if (!selectedEditGroup.value || !editorGroups.value.some(g => g.name === selectedEditGroup.value.name)) {
@@ -4205,11 +4274,13 @@ const handleDeleteSource = async (id) => {
 
 .xui-metric-box.clickable-metric {
   cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
 }
 
 .xui-metric-box.clickable-metric:hover {
   border-color: #58a6ff;
   background-color: #262932;
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1080px) {
@@ -6798,6 +6869,65 @@ const handleDeleteSource = async (id) => {
   color: #94a3b8;
   font-family: Consolas, Monaco, monospace;
 }
+.n-card-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.n-card-location .loc-icon {
+  font-size: 13px;
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.n-card-location .loc-flag {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.n-card-location .loc-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-proto-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.node-loc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.xui-node-card.card-selected .node-loc-badge {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: #93c5fd;
+}
+
 
 .server-icon {
   font-size: 13px;

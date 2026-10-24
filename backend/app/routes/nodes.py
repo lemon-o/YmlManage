@@ -35,6 +35,23 @@ class TestNodesDelayRequest(BaseModel):
     timeout: Optional[float] = Field(default=3.5, description="超时秒数")
 
 
+class IpLookupRequest(BaseModel):
+    queries: List[str] = Field(..., description="要查询归属地的 IP 或域名列表")
+
+
+_ip_geo_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def get_flag_emoji_py(country_code: str) -> str:
+    """根据 ISO 两位国家代码转换国家旗帜 Emoji"""
+    if not country_code or len(country_code) != 2:
+        return "🌐"
+    try:
+        return "".join(chr(0x1F1E6 + ord(c.upper()) - ord("A")) for c in country_code)
+    except Exception:
+        return "🌐"
+
+
 @router.post("/fetch-stream")
 async def fetch_nodes_stream(req: FetchNodesRequest):
     """
@@ -345,3 +362,83 @@ async def test_nodes_delay_endpoint(req: TestNodesDelayRequest):
     )
     delays_map = {n.get("name"): n.get("delay", -1) for n in results}
     return {"delays": delays_map}
+
+
+@router.post("/ip-lookup")
+async def batch_lookup_ips(req: IpLookupRequest):
+    """
+    批量查询 IP 或域名的归属国家与区域信息 (带内存缓存与极速批处理)
+    """
+    import socket
+    import httpx
+
+    results: Dict[str, Any] = {}
+    missing_queries: List[str] = []
+
+    for q in req.queries:
+        clean_q = str(q).strip()
+        if not clean_q or clean_q in ["127.0.0.1", "localhost", "0.0.0.0"]:
+            continue
+        if clean_q in _ip_geo_cache:
+            results[clean_q] = _ip_geo_cache[clean_q]
+        else:
+            missing_queries.append(clean_q)
+
+    if not missing_queries:
+        return {"data": results}
+
+    # 去重并限制单次批查上限
+    missing_queries = list(dict.fromkeys(missing_queries))[:60]
+    loop = asyncio.get_event_loop()
+    batch_payload = []
+    reverse_map = {}
+
+    for q in missing_queries:
+        ip_candidate = q
+        is_ip = False
+        parts = q.split(".")
+        if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            is_ip = True
+        elif ":" in q:
+            is_ip = True
+
+        if not is_ip:
+            try:
+                addrinfo = await asyncio.wait_for(
+                    loop.getaddrinfo(q, None, family=socket.AF_INET),
+                    timeout=1.5
+                )
+                if addrinfo:
+                    ip_candidate = addrinfo[0][4][0]
+            except Exception:
+                pass
+
+        reverse_map[ip_candidate] = q
+        batch_payload.append({"query": ip_candidate, "lang": "zh-CN"})
+
+    if batch_payload:
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.post("http://ip-api.com/batch", json=batch_payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data:
+                        orig_query = reverse_map.get(item.get("query"), item.get("query"))
+                        if item.get("status") == "success":
+                            c_code = item.get("countryCode", "")
+                            flag = get_flag_emoji_py(c_code)
+                            geo_info = {
+                                "country": item.get("country", "未知国家"),
+                                "countryCode": c_code,
+                                "region": item.get("regionName", ""),
+                                "city": item.get("city", ""),
+                                "flag": flag,
+                                "isp": item.get("isp", "")
+                            }
+                            _ip_geo_cache[orig_query] = geo_info
+                            results[orig_query] = geo_info
+        except Exception:
+            pass
+
+    return {"data": results}
+

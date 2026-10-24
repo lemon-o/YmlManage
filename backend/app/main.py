@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from fastapi import FastAPI, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -15,7 +16,7 @@ from .routes.auth import extract_token_from_request
 app = FastAPI(
     title="YmlManage - 节点母本维护管理平台",
     description="维护 Clash/Mihomo 母本配置文件，从外部订阅提取节点勾选导入并分发",
-    version="1.3.1"
+    version="1.4.0"
 )
 
 # 允许跨域
@@ -26,6 +27,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 启用 GZip 压缩，任何大于 1000 字节的静态资源/接口自动压缩，极大缩短公网传输等待时间
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.middleware("http")
@@ -124,15 +128,28 @@ def init_default_data():
 
 # 静态文件前端托管
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+ASSETS_DIR = STATIC_DIR / "assets"
 if STATIC_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    class CachedStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
+    app.mount("/assets", CachedStaticFiles(directory=ASSETS_DIR), name="assets")
 
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(STATIC_DIR / "index.html")
+            resp = FileResponse(file_path)
+            if full_path.startswith("assets/"):
+                resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return resp
+        resp = FileResponse(STATIC_DIR / "index.html")
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
 else:
     @app.get("/")
     def index():

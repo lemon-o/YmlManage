@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import path from 'path'
 
 export default defineConfig({
   plugins: [vue()],
@@ -19,6 +18,15 @@ export default defineConfig({
   },
   build: {
     outDir: '../backend/app/static',
-    emptyOutDir: true
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-element': ['element-plus', '@element-plus/icons-vue'],
+          'vendor-vue': ['vue', 'axios']
+        }
+      }
+    }
   }
 })

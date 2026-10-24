@@ -172,13 +172,20 @@ def list_profiles():
     return YamlManager.list_profiles()
 
 
+_cached_lan_ip = None
+
 def get_lan_ip() -> str:
-    """获取本机在局域网中的 IPv4 地址"""
+    """获取本机局域网 IPv4 地址"""
+    global _cached_lan_ip
+    if _cached_lan_ip:
+        return _cached_lan_ip
     try:
         import socket
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(0.5)
             s.connect(('223.5.5.5', 80))
-            return s.getsockname()[0]
+            _cached_lan_ip = s.getsockname()[0]
+            return _cached_lan_ip
     except Exception:
         return "127.0.0.1"
 

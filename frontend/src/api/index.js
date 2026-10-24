@@ -79,6 +79,7 @@ export const fetchNodesStream = (data, signal) => {
 }
 export const importNodes = (data) => api.post('/nodes/import', data)
 export const testNodesDelay = (data) => api.post('/nodes/test-delays', data)
+export const lookupIpLocations = (queries) => api.post('/nodes/ip-lookup', { queries })
 
 // 测速与测延迟接口相关 API
 export const getTestUrls = () => api.get('/profiles/test-urls')
