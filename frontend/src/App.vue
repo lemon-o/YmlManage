@@ -1017,7 +1017,7 @@
             >
               <div class="n-card-top">
                 <span class="node-protocol-tag" :class="'proto-' + (node.type || 'unknown')">
-                  {{ node.ports ? `${node.type} (跳跃)` : (node.type || 'custom') }}
+                  {{ node.ports ? (node['hop-interval'] ? `${node.type} (跳跃 ${node['hop-interval']}s)` : `${node.type} (跳跃)`) : (node.type || 'custom') }}
                 </span>
                 <div class="n-card-actions">
                   <button class="n-icon-btn edit" title="编辑节点" @click="openEditNodeDetail(node)">
@@ -1089,17 +1089,14 @@
           </div>
         </div>
 
-        <!-- 3. YAML 源码面板 -->
+        <!-- 3. YAML 源码面板 (已升级为专业代码编辑器：语法高亮、行号、折叠、智能缩进) -->
         <div v-else class="editor-yaml-layout">
           <div class="yaml-toolbar-tip">
             <span>支持在线直接编辑 YAML 源码。在可视化界面与源码之间切换时，系统会自动双向同步与校验。</span>
           </div>
-          <el-input
+          <YamlCodeEditor
             v-model="rawYamlContent"
-            type="textarea"
-            :rows="24"
-            class="code-textarea"
-            style="font-family: Consolas, Monaco, monospace; font-size: 13px;"
+            height="520px"
             placeholder="正在加载 YAML 源码..."
           />
         </div>
@@ -1245,6 +1242,21 @@
               <el-input v-model="currentNodeForm.port" placeholder="例如: 443 或 20000-40000 (端口跳跃)" />
             </el-form-item>
           </div>
+          <!-- 端口跳跃节点：跳跃间隔 (hop-interval) 设置项 -->
+          <el-form-item v-if="isPortHopNode" label="端口跳跃间隔 (hop-interval，单位为秒)">
+            <el-input
+              v-model="currentNodeForm['hop-interval']"
+              type="number"
+              min="1"
+              placeholder="未设置时留空；填写数值生效，删除数值后自动删除此参数"
+              clearable
+            >
+              <template #prepend>
+                <el-icon><Odometer /></el-icon>
+              </template>
+              <template #append>秒</template>
+            </el-input>
+          </el-form-item>
           <el-form-item label="密码 / UUID / 密钥">
             <el-input v-model="currentNodeForm.password" placeholder="密码或 UUID" />
           </el-form-item>
@@ -1894,6 +1906,7 @@ import {
 } from '@element-plus/icons-vue'
 import * as api from './api'
 import { getNodeLocation } from './utils/location'
+import YamlCodeEditor from './components/YamlCodeEditor.vue'
 
 // 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
 const authStatus = ref({
@@ -2497,7 +2510,17 @@ const currentNodeForm = ref({
   port: 443,
   password: '',
   sni: '',
-  'skip-cert-verify': true
+  'skip-cert-verify': true,
+  'hop-interval': ''
+})
+
+// 判断当前表单中的节点是否属于端口跳跃节点
+const isPortHopNode = computed(() => {
+  const p = String(currentNodeForm.value?.port || '').trim()
+  const ps = String(currentNodeForm.value?.ports || '').trim()
+  const rawHop = currentNodeForm.value?.['hop-interval'] ?? currentNodeForm.value?.['hop_interval']
+  const hasHop = rawHop !== undefined && rawHop !== null && rawHop !== ''
+  return p.includes('-') || p.includes(',') || ps.includes('-') || ps.includes(',') || hasHop
 })
 let oldEditingNodeName = ''
 
@@ -3773,7 +3796,8 @@ const openAddNodeModal = () => {
     port: 443,
     password: '',
     sni: '',
-    'skip-cert-verify': true
+    'skip-cert-verify': true,
+    'hop-interval': ''
   }
   editNodeModalVisible.value = true
 }
@@ -3782,7 +3806,22 @@ const openEditNodeDetail = (node) => {
   isEditingExistingNode.value = true
   nodeAddMode.value = 'form'
   oldEditingNodeName = node.name || ''
-  currentNodeForm.value = JSON.parse(JSON.stringify(node))
+  const copy = JSON.parse(JSON.stringify(node))
+
+  // 1. 若配置了跳跃端口 ports (如 27000-30000)，输入框优先回显跳跃范围，避免被首个 port 覆盖
+  if (copy.ports) {
+    copy.port = String(copy.ports)
+  }
+
+  // 2. 读取 hop-interval 参数，若无此参数则输入框留空
+  const rawHop = copy['hop-interval'] ?? copy['hop_interval']
+  if (rawHop !== undefined && rawHop !== null && String(rawHop).trim() !== '') {
+    copy['hop-interval'] = rawHop
+  } else {
+    copy['hop-interval'] = ''
+  }
+
+  currentNodeForm.value = copy
   editNodeModalVisible.value = true
 }
 
@@ -3827,7 +3866,23 @@ const confirmSaveNode = async () => {
     cleanNode.port = isNaN(firstP) ? 443 : firstP
   } else {
     cleanNode.port = parseInt(portStr) || 443
+    delete cleanNode.ports
   }
+
+  // 端口跳跃间隔 (hop-interval) 处理：
+  // 填写数值后（单位为秒），添加上 hop-interval 参数；删除数值后删除 hop-interval 参数
+  const hopVal = f['hop-interval']
+  if (hopVal !== undefined && hopVal !== null && String(hopVal).trim() !== '') {
+    const hopInt = parseInt(String(hopVal).trim(), 10)
+    if (!isNaN(hopInt) && hopInt > 0) {
+      cleanNode['hop-interval'] = hopInt
+    } else {
+      delete cleanNode['hop-interval']
+    }
+  } else {
+    delete cleanNode['hop-interval']
+  }
+  delete cleanNode['hop_interval']
 
   if (isEditingExistingNode.value) {
     const idx = editorProxies.value.findIndex(p => p.name === oldEditingNodeName)
@@ -7115,7 +7170,7 @@ const handleDeleteSource = async (id) => {
 .editor-yaml-layout {
   display: flex;
   flex-direction: column;
-  height: 520px;
+  min-height: 560px;
 }
 
 .yaml-toolbar-tip {
