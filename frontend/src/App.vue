@@ -793,12 +793,34 @@
     <!-- 母本可视化编辑与源码编辑弹窗 (完全 3X-UI 暗黑科技定制) -->
     <el-dialog
       v-model="profileEditorVisible"
-      :title="`母本编辑: ${editorProfileName}`"
+      :fullscreen="isEditorFullscreen"
       width="1280px"
       top="2.5vh"
       class="xui-custom-dialog xui-editor-dialog"
+      :class="{ 'is-dialog-fullscreen': isEditorFullscreen }"
       :destroy-on-close="true"
     >
+      <template #header="{ close, titleId, titleClass }">
+        <div class="xui-dialog-custom-header">
+          <span :id="titleId" class="custom-dialog-title">母本编辑: {{ editorProfileName }}</span>
+          <div class="custom-dialog-header-actions">
+            <!-- 弹窗全屏切换按钮 -->
+            <button
+              type="button"
+              class="dialog-fullscreen-btn"
+              :class="{ active: isEditorFullscreen }"
+              :title="isEditorFullscreen ? '还原窗口' : '全屏显示'"
+              @click="isEditorFullscreen = !isEditorFullscreen"
+            >
+              <el-icon :size="14">
+                <FullScreen v-if="!isEditorFullscreen" />
+                <Aim v-else />
+              </el-icon>
+              <span>{{ isEditorFullscreen ? '还原' : '全屏' }}</span>
+            </button>
+          </div>
+        </div>
+      </template>
       <div v-loading="loadingEditorData" class="editor-main-container">
         <!-- 顶部主标签栏 (大间距、清晰层级) -->
         <div class="editor-tabs-bar">
@@ -1966,7 +1988,8 @@ import {
   Folder, Collection, Download, Search,
   Upload, Check, Plus, UploadFilled,
   DocumentCopy, Connection, Files, CircleCheck, CircleClose, Loading, Link,
-  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer, Location
+  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer, Location,
+  FullScreen, Aim
 } from '@element-plus/icons-vue'
 import * as api from './api'
 import { getNodeLocation } from './utils/location'
@@ -2539,6 +2562,7 @@ const handleDeleteBackup = async (filename) => {
 
 // 可视化编辑与源码编辑器
 const profileEditorVisible = ref(false)
+const isEditorFullscreen = ref(false)
 const editorProfileName = ref('')
 const editorActiveTab = ref('groups') // groups | proxies | yaml
 const loadingEditorData = ref(false)
@@ -2638,16 +2662,72 @@ const filteredEditorGroups = computed(() => {
 // 获取节点的订阅源名称
 const getNodeSubSource = (node) => {
   if (!node) return '自建节点'
-  const explicit = node.sub_source || node.source || node.subscription || node.sub_name
-  if (explicit && String(explicit).trim()) {
-    return String(explicit).trim()
+  const explicit = String(node.sub_source || node.source || node.subscription || node.sub_name || '').trim()
+
+  // 1. 如果已记录绑定到常用源的名称（非自建/外部/内置），直接返回所绑定的订阅源名称
+  if (explicit && explicit !== '自建节点' && explicit !== '外部订阅' && explicit !== '母本内置') {
+    return explicit
   }
-  const s = String(node.server || '').toLowerCase()
-  if (s.includes('344211') || s.includes('xyz')) {
-    return '飞鸟云'
+
+  // 2. 补全或平滑兼容历史节点：按常用源进行智能识别与绑定
+  const server = String(node.server || '').trim().toLowerCase()
+  const name = String(node.name || '').trim().toLowerCase()
+  const sni = String(node.sni || node.servername || node.host || '').trim().toLowerCase()
+  const loc = getNodeLocation(node, ipLocationMap.value)
+  const locText = String(loc.text || '').toLowerCase()
+
+  for (const src of savedSources.value) {
+    if (!src || !src.name) continue
+    const sName = src.name.trim()
+    const sNameLower = sName.toLowerCase()
+    const sUrl = String(src.url || '').trim().toLowerCase()
+
+    let sDomain = ''
+    try {
+      if (sUrl.startsWith('http')) sDomain = new URL(sUrl).hostname.toLowerCase()
+    } catch (e) {}
+    const domainKeyword = sDomain ? sDomain.replace(/^(cdn\d*|api|sub|client|www)\./, '').split('.')[0] : ''
+
+    if (sDomain && (server.includes(sDomain) || sni.includes(sDomain))) return sName
+    if (domainKeyword && domainKeyword.length >= 3 && (server.includes(domainKeyword) || sni.includes(domainKeyword))) return sName
+    if (sNameLower.length >= 2 && (server.includes(sNameLower) || sni.includes(sNameLower) || name.includes(sNameLower))) return sName
+    if (domainKeyword && domainKeyword.length >= 3 && name.includes(domainKeyword)) return sName
+
+    if (sNameLower.includes('cloudf') || sNameLower === 'cf' || sNameLower.includes('cf优选')) {
+      if (
+        name.includes('cf') ||
+        name.includes('cloudf') ||
+        locText.includes('cloudflare') ||
+        server.startsWith('104.16.') || server.startsWith('104.17.') ||
+        server.startsWith('104.18.') || server.startsWith('104.19.') ||
+        server.startsWith('104.20.') || server.startsWith('104.21.') ||
+        server.startsWith('172.64.') || server.startsWith('172.65.') ||
+        server.startsWith('172.66.') || server.startsWith('172.67.') ||
+        server.startsWith('162.159.') || server.startsWith('198.41.') ||
+        server.startsWith('108.162.')
+      ) {
+        return sName
+      }
+    }
+    if (sNameLower.includes('飞鸟') || sNameLower.includes('feiniao')) {
+      if (
+        name.includes('飞鸟') ||
+        server.includes('344211') ||
+        server.includes('459292') ||
+        server.includes('130239') ||
+        server.includes('908970') ||
+        server.includes('xyz')
+      ) {
+        return sName
+      }
+    }
   }
-  if (s.includes('lemjoo')) {
+
+  if (server.includes('lemjoo') || explicit === '自建节点') {
     return '自建节点'
+  }
+  if (explicit === '外部订阅') {
+    return '外部订阅'
   }
   return '自建节点'
 }
@@ -3401,10 +3481,63 @@ const loadSources = async () => {
 }
 
 const applyQuickSource = (id) => {
+  selectedSourceId.value = id || ''
   const item = savedSources.value.find(s => s.id === id)
   if (item) {
     fetchUrl.value = item.url
   }
+}
+
+// 自动检测输入链接是否匹配已保存的常用源
+watch(fetchUrl, (newVal) => {
+  const clean = (newVal || '').trim()
+  if (!clean) {
+    selectedSourceId.value = ''
+    return
+  }
+  const norm = clean.toLowerCase().replace(/\/+$/, '')
+  const exact = savedSources.value.find(s => s.url && s.url.trim().toLowerCase().replace(/\/+$/, '') === norm)
+  if (exact) {
+    selectedSourceId.value = exact.id
+  } else {
+    try {
+      const uHost = new URL(clean).hostname.toLowerCase()
+      const hostMatch = savedSources.value.find(s => {
+        try { return s.url && new URL(s.url).hostname.toLowerCase() === uHost } catch (e) { return false }
+      })
+      if (hostMatch) {
+        selectedSourceId.value = hostMatch.id
+      }
+    } catch (e) {}
+  }
+})
+
+// 获取当前提取操作所绑定的常用源名称（若使用常用源提取，严格记录绑定到该常用源名称）
+const getActiveExtractSource = () => {
+  if (selectedSourceId.value) {
+    const s = savedSources.value.find(item => item.id === selectedSourceId.value)
+    if (s && s.name && s.name.trim()) return s.name.trim()
+  }
+  const clean = (fetchUrl.value || '').trim()
+  if (clean) {
+    const norm = clean.toLowerCase().replace(/\/+$/, '')
+    const exact = savedSources.value.find(s => s.url && s.url.trim().toLowerCase().replace(/\/+$/, '') === norm)
+    if (exact && exact.name && exact.name.trim()) return exact.name.trim()
+
+    try {
+      const uHost = new URL(clean).hostname.toLowerCase()
+      for (const s of savedSources.value) {
+        if (!s.url) continue
+        try {
+          const sHost = new URL(s.url).hostname.toLowerCase()
+          if (sHost === uHost) {
+            if (s.name && s.name.trim()) return s.name.trim()
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  return ''
 }
 
 const pasteFromClipboard = async () => {
@@ -3451,9 +3584,7 @@ const handleFetchNodes = async () => {
   fetchAbortController = new AbortController()
 
   try {
-    const matchedSource = savedSources.value.find(s => s.id === selectedSourceId.value) ||
-                          savedSources.value.find(s => s.url.trim() === fetchUrl.value.trim())
-    const curSourceName = matchedSource ? matchedSource.name : ''
+    const curSourceName = getActiveExtractSource()
 
     const response = await api.fetchNodesStream({
       url: fetchUrl.value.trim(),
@@ -3513,7 +3644,18 @@ const handleFetchNodes = async () => {
     if (finalResult) {
       totalRawCount.value = finalResult.total_raw || 0
       filteredCount.value = finalResult.filtered_count || 0
-      fetchedNodes.value = finalResult.nodes || []
+      const nodes = finalResult.nodes || []
+      // 记录提取到的节点绑定到常用源的名称
+      const boundSrc = curSourceName || getActiveExtractSource()
+      if (boundSrc) {
+        nodes.forEach(n => {
+          n.sub_source = boundSrc
+          if (n.raw) {
+            n.raw.sub_source = boundSrc
+          }
+        })
+      }
+      fetchedNodes.value = nodes
       resolveMissingLocations(fetchedNodes.value)
       newCount.value = finalResult.new_count || 0
       existingCount.value = finalResult.existing_count || 0
@@ -3647,14 +3789,18 @@ const clearAllGroups = () => {
 }
 
 const confirmImport = async () => {
-  const matchedSource = savedSources.value.find(s => s.id === selectedSourceId.value) ||
-                        savedSources.value.find(s => s.url.trim() === fetchUrl.value.trim())
-  const curSourceName = matchedSource ? matchedSource.name : ''
+  const boundSourceName = getActiveExtractSource()
 
   const nodesToImport = fetchedNodes.value.filter(n => selectedNodeIds.value.includes(n.id)).map(n => {
     const raw = { ...(n.raw || n) }
-    if (!raw.sub_source) {
-      raw.sub_source = n.sub_source || curSourceName || '外部订阅'
+    // 如果使用常用源提取节点，则记录提取到的节点绑定到常用源的名称
+    const sName = boundSourceName || n.sub_source || raw.sub_source
+    if (sName && sName !== '自建节点' && sName !== '外部订阅') {
+      raw.sub_source = sName
+    } else if (sName) {
+      raw.sub_source = sName
+    } else {
+      raw.sub_source = '外部订阅'
     }
     return raw
   })
@@ -4021,7 +4167,7 @@ const openAddNodeModal = () => {
   isEditingExistingNode.value = false
   nodeAddMode.value = 'link'
   nodeLinkInput.value = ''
-  const defaultSubSource = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
+  const defaultSubSource = activeProxySourceTab.value === 'ALL' ? '自建节点' : activeProxySourceTab.value
   currentNodeForm.value = {
     name: '',
     type: 'hysteria2',
@@ -4074,7 +4220,7 @@ const confirmSaveNode = async () => {
         parsedNode.name = `${parsedNode.name}_${Date.now().toString().slice(-4)}`
       }
       if (!parsedNode.sub_source) {
-        parsedNode.sub_source = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
+        parsedNode.sub_source = activeProxySourceTab.value === 'ALL' ? '自建节点' : activeProxySourceTab.value
       }
       editorProxies.value.unshift(parsedNode)
       editNodeModalVisible.value = false
@@ -4100,7 +4246,7 @@ const confirmSaveNode = async () => {
   if (cleanNode.sub_source && String(cleanNode.sub_source).trim()) {
     cleanNode.sub_source = String(cleanNode.sub_source).trim()
   } else {
-    cleanNode.sub_source = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
+    cleanNode.sub_source = activeProxySourceTab.value === 'ALL' ? '自建节点' : activeProxySourceTab.value
   }
   const portStr = String(f.port || '').trim()
   if (portStr.includes('-') || portStr.includes(',')) {
@@ -6659,6 +6805,82 @@ const handleDeleteSource = async (id) => {
   font-weight: 600 !important;
 }
 
+.xui-dialog-custom-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 36px;
+}
+
+.custom-dialog-title {
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.custom-dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialog-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dialog-fullscreen-btn:hover {
+  background-color: rgba(0, 122, 204, 0.25);
+  border-color: #007acc;
+  color: #38bdf8;
+}
+
+.dialog-fullscreen-btn.active {
+  background-color: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+/* 全屏状态下的弹窗样式 */
+.xui-editor-dialog.is-dialog-fullscreen {
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
+.xui-editor-dialog.is-dialog-fullscreen .el-dialog__body {
+  height: calc(100vh - 120px) !important;
+  max-height: calc(100vh - 120px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.xui-editor-dialog.is-dialog-fullscreen .editor-main-container {
+  height: 100% !important;
+  flex: 1 1 auto !important;
+}
+
+.xui-editor-dialog.is-dialog-fullscreen .editor-yaml-layout {
+  height: calc(100% - 40px) !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.xui-editor-dialog.is-dialog-fullscreen .vscode-editor-window {
+  height: 100% !important;
+  flex: 1 1 auto !important;
+}
+
 .xui-editor-dialog .el-dialog__body {
   padding: 22px 28px !important;
   background-color: #131519 !important;
@@ -7681,13 +7903,81 @@ const handleDeleteSource = async (id) => {
   /* 全局弹窗宽度自适应全屏微留白 */
   .el-dialog,
   .xui-custom-dialog,
-  .xui-editor-dialog,
   .fetch-progress-dialog,
   .remote-upload-dialog {
     width: 95vw !important;
     max-width: 95vw !important;
     margin: 10px auto !important;
     border-radius: 12px !important;
+  }
+
+  /* 母本编辑弹窗在手机端宽度 100vw 彻底自适应，解决太窄与遮挡问题 */
+  .xui-editor-dialog {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    top: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .xui-editor-dialog .el-dialog__header {
+    padding: 10px 12px !important;
+  }
+
+  .xui-editor-dialog .xui-dialog-custom-header {
+    padding-right: 28px !important;
+  }
+
+  .xui-editor-dialog .custom-dialog-title {
+    font-size: 14px !important;
+    max-width: 160px !important;
+  }
+
+  .xui-editor-dialog .dialog-fullscreen-btn {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .xui-editor-dialog .el-dialog__body {
+    padding: 6px 4px !important;
+    flex: 1 1 auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .xui-editor-dialog .editor-main-container {
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .xui-editor-dialog .editor-yaml-layout {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .xui-editor-dialog .vscode-editor-window {
+    flex: 1 1 auto !important;
+    height: calc(100vh - 170px) !important;
+    min-height: 380px !important;
+  }
+
+  .xui-editor-dialog .yaml-toolbar-tip {
+    display: none !important;
+  }
+
+  .xui-editor-dialog .el-dialog__footer {
+    padding: 8px 12px !important;
   }
 
   .el-dialog__header {

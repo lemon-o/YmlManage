@@ -24,22 +24,33 @@ class FetchNodesRequest(BaseModel):
 
 
 def resolve_sub_source_name(req_source_name: Optional[str], url: str) -> str:
-    """智能解析提取节点的所属订阅源名称"""
+    """如果使用常用源提取节点，则记录提取到的节点绑定到常用源的名称"""
     if req_source_name and req_source_name.strip():
         return req_source_name.strip()
     try:
         from .sources import load_sources
-        for s in load_sources():
-            if s.get("url", "").strip() == url.strip():
-                if s.get("name"):
-                    return str(s["name"]).strip()
-    except Exception:
-        pass
-    try:
-        import urllib.parse
-        host = urllib.parse.urlparse(url).netloc
-        if host:
-            return host
+        clean_url = (url or "").strip().lower().rstrip("/")
+        if clean_url:
+            sources = load_sources()
+            for s in sources:
+                s_url = s.get("url", "").strip().lower().rstrip("/")
+                if s_url and s_url == clean_url:
+                    if s.get("name"):
+                        return str(s["name"]).strip()
+            import urllib.parse
+            req_host = urllib.parse.urlparse(clean_url).netloc.lower()
+            if req_host:
+                for s in sources:
+                    s_url = s.get("url", "").strip().lower()
+                    if s_url:
+                        s_host = urllib.parse.urlparse(s_url).netloc.lower()
+                        if s_host and (s_host == req_host or s_host in req_host or req_host in s_host):
+                            if s.get("name"):
+                                return str(s["name"]).strip()
+                    s_name = s.get("name", "").strip().lower()
+                    if s_name and len(s_name) >= 3 and s_name in clean_url:
+                        return str(s["name"]).strip()
+                return req_host
     except Exception:
         pass
     return "外部订阅"
@@ -393,11 +404,11 @@ def import_selected_nodes(req: ImportNodesRequest):
     nodes_payload = []
     for item in req.nodes:
         if "raw" in item and isinstance(item["raw"], dict):
-            raw_node = item["raw"]
-            if "sub_source" in item and not raw_node.get("sub_source"):
+            raw_node = dict(item["raw"])
+            if "sub_source" in item and item["sub_source"]:
                 raw_node["sub_source"] = item["sub_source"]
             nodes_payload.append(raw_node)
-        elif "name" in item:
+        elif isinstance(item, dict) and "name" in item:
             nodes_payload.append(item)
 
     try:
