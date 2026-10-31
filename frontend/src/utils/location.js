@@ -51,42 +51,42 @@ export const LOCATION_RULES = [
     code: 'HK',
     flag: '🇭🇰',
     text: '香港',
-    regex: /(?:^|[^a-zA-Z])(?:HK|HKG|Hong\s*Kong)(?:[^a-zA-Z]|$)|香港|深港|广港|沪港/i
+    regex: /(?:^|[^a-zA-Z])(?:HK|HKG|Hong\s*Kong)(?:[^a-zA-Z]|$)|香港|深港|广港|沪港|京港/i
   },
   // 台湾
   {
     code: 'TW',
     flag: '🇹🇼',
     text: '台湾',
-    regex: /(?:^|[^a-zA-Z])(?:TW|TWN|Taiwan|Taipei)(?:[^a-zA-Z]|$)|台湾|台北|台中|高雄|深台/i
+    regex: /(?:^|[^a-zA-Z])(?:TW|TWN|Taiwan|Taipei)(?:[^a-zA-Z]|$)|台湾|台北|台中|高雄|深台|广台|沪台/i
   },
   // 日本
   {
     code: 'JP',
     flag: '🇯🇵',
     text: '日本',
-    regex: /(?:^|[^a-zA-Z])(?:JP|JPN|Japan|Tokyo|Osaka)(?:[^a-zA-Z]|$)|日本|东京|大阪|川崎|沪日|京日/i
+    regex: /(?:^|[^a-zA-Z])(?:JP|JPN|Japan|Tokyo|Osaka)(?:[^a-zA-Z]|$)|日本|东京|大阪|川崎|沪日|京日|广日|深日/i
   },
   // 新加坡
   {
     code: 'SG',
     flag: '🇸🇬',
     text: '新加坡',
-    regex: /(?:^|[^a-zA-Z])(?:SG|SGP|Singapore)(?:[^a-zA-Z]|$)|新加坡|狮城|沪新|广新/i
+    regex: /(?:^|[^a-zA-Z])(?:SG|SGP|Singapore)(?:[^a-zA-Z]|$)|新加坡|狮城|沪新|广新|深新|京新/i
   },
   // 美国
   {
     code: 'US',
     flag: '🇺🇸',
     text: '美国',
-    regex: /(?:^|[^a-zA-Z])(?:US|USA|United\s*States|America|Los\s*Angeles|San\s*Jose|Seattle|Chicago|Dallas|New\s*York|Phoenix|Miami|Portland|Oregon|Virginia|Atlanta|Silicon\s*Valley)(?:[^a-zA-Z]|$)|美国|洛杉矶|硅谷|圣何塞|西雅图|芝加哥|达拉斯|纽约|波特兰|俄勒冈|凤凰城|弗吉尼亚|迈阿密|亚特兰大|沪美|中美/i
+    regex: /(?:^|[^a-zA-Z])(?:US|USA|United\s*States|America|Los\s*Angeles|San\s*Jose|Seattle|Chicago|Dallas|New\s*York|Phoenix|Miami|Portland|Oregon|Virginia|Atlanta|Silicon\s*Valley)(?:[^a-zA-Z]|$)|美国|洛杉矶|硅谷|圣何塞|西雅图|芝加哥|达拉斯|纽约|波特兰|俄勒冈|凤凰城|弗吉尼亚|迈阿密|亚特兰大|沪美|中美|广美|深美|京美/i
   },
   // 韩国
   {
     code: 'KR',
     flag: '🇰🇷',
     text: '韩国',
-    regex: /(?:^|[^a-zA-Z])(?:KR|KOR|Korea|Seoul)(?:[^a-zA-Z]|$)|韩国|首尔|仁川/i
+    regex: /(?:^|[^a-zA-Z])(?:KR|KOR|Korea|Seoul)(?:[^a-zA-Z]|$)|韩国|首尔|仁川|沪韩|广韩|深韩/i
   },
   // 英国
   {
@@ -163,7 +163,7 @@ export const LOCATION_RULES = [
     code: 'MY',
     flag: '🇲🇾',
     text: '马来西亚',
-    regex: /(?:^|[^a-zA-Z])(?:MY|MYS|Malaysia|Kuala\s*Lumpur)(?:[^a-zA-Z]|$)|马来西亚|吉隆坡|大马/i
+    regex: /(?:^|[^a-zA-Z])(?:MY|MYS|Malaysia|Kuala\s*Lumpur)(?:[^a-zA-Z]|$)|马来西亚|吉隆坡|大马|马来/i
   },
   // 荷兰
   {
@@ -326,7 +326,26 @@ export function getNodeLocation(node, ipCache = {}) {
     svg: getFlagSvg(code)
   })
 
-  // 1. 优先检查异步 IP GeoIP 解析结果
+  // 1. 检查国旗 Emoji（节点名最显眼的国家标志）
+  for (const [flag, info] of Object.entries(EMOJI_FLAG_MAP)) {
+    if (name.includes(flag)) {
+      return makeRes(info.code, info.flag, info.text, `${info.flag} ${info.text}`)
+    }
+  }
+
+  // 2. 检查常见国家规则匹配（优先针对节点名称，中继节点的出口地区由节点名决定，而入口中继IP通常是其他国家的）
+  for (const rule of LOCATION_RULES) {
+    if (rule.regex.test(name)) {
+      return makeRes(rule.code, rule.flag, rule.text, `${rule.flag} ${rule.text}`)
+    }
+  }
+
+  // 3. 检查 Cloudflare Anycast IP 段或名称
+  if (isCloudflare(name, server)) {
+    return makeRes('CF', '🌐', 'Cloudflare Anycast', '🌐 Cloudflare Anycast')
+  }
+
+  // 4. 节点名称未包含区域信息时，检查异步 IP GeoIP 解析结果
   if (server && ipCache && ipCache[server]) {
     const geo = ipCache[server]
     if (geo && geo.country) {
@@ -335,25 +354,6 @@ export function getNodeLocation(node, ipCache = {}) {
       const cCode = geo.countryCode || 'IP'
       return makeRes(cCode, geo.flag || '🌐', displayText, `${geo.flag || '🌐'} ${geo.country}${cityPart}`)
     }
-  }
-
-  // 2. 检查国旗 Emoji
-  for (const [flag, info] of Object.entries(EMOJI_FLAG_MAP)) {
-    if (name.includes(flag)) {
-      return makeRes(info.code, info.flag, info.text, `${info.flag} ${info.text}`)
-    }
-  }
-
-  // 3. 检查常见国家规则匹配（针对节点名称）
-  for (const rule of LOCATION_RULES) {
-    if (rule.regex.test(name)) {
-      return makeRes(rule.code, rule.flag, rule.text, `${rule.flag} ${rule.text}`)
-    }
-  }
-
-  // 4. 检查 Cloudflare Anycast IP 段或名称
-  if (isCloudflare(name, server)) {
-    return makeRes('CF', '🌐', 'Cloudflare Anycast', '🌐 Cloudflare Anycast')
   }
 
   // 5. 检查节点服务器域名中的地域代号 (如 sg07.150239.xyz, hk.node.com)

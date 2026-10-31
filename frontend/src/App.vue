@@ -1151,8 +1151,8 @@
               </div>
 
               <div class="n-card-footer">
-                <el-tooltip placement="top" :content="getNodeGroupsTooltip(node.name)">
-                  <span class="groups-included-pill">
+                <el-tooltip placement="top" :content="`点击增减所属策略组 (当前: ${getNodeGroupsTooltip(node.name)})`">
+                  <span class="groups-included-pill clickable" @click.stop="openNodeGroupsModal(node)">
                     <el-icon style="margin-right: 4px;"><Files /></el-icon>
                     所属 {{ getNodeGroupsCount(node.name) }} 个策略组
                   </span>
@@ -1357,10 +1357,116 @@
         </el-form>
       </div>
 
+      <!-- 要添加到的策略组 (粘贴链接导入与手动填写均支持) -->
+      <div class="target-groups-select-section">
+        <div class="tg-section-header">
+          <span class="tg-section-title">
+            要添加到的策略组
+            <span class="tg-count-badge">{{ newNodeTargetGroupNames.length }} / {{ editorGroups.length }}</span>
+          </span>
+          <div class="tg-quick-actions">
+            <button type="button" class="tg-link-btn" @click="newNodeTargetGroupNames = editorGroups.map(g => g.name)">全选</button>
+            <button type="button" class="tg-link-btn" @click="newNodeTargetGroupNames = []">清空</button>
+          </div>
+        </div>
+        <div class="tg-checkbox-scroll">
+          <el-checkbox-group v-model="newNodeTargetGroupNames">
+            <div class="tg-checkbox-grid">
+              <el-checkbox
+                v-for="grp in editorGroups"
+                :key="grp.name"
+                :label="grp.name"
+                :value="grp.name"
+              >
+                <span class="tg-cb-label" :title="grp.name">{{ grp.name }}</span>
+              </el-checkbox>
+            </div>
+          </el-checkbox-group>
+          <div v-if="editorGroups.length === 0" class="tg-empty-tip">
+            母本中暂无策略组
+          </div>
+        </div>
+      </div>
+
       <template #footer>
         <button class="xui-std-btn" @click="editNodeModalVisible = false">取消</button>
         <button class="xui-primary-btn" style="margin-left: 8px;" @click="confirmSaveNode">
           {{ isEditingExistingNode ? '保存修改' : '确认添加' }}
+        </button>
+      </template>
+    </el-dialog>
+
+    <!-- 管理单节点所属策略组弹窗 (点击卡片所属策略组时唤起) -->
+    <el-dialog
+      v-model="nodeGroupsModalVisible"
+      :title="`管理节点所属策略组: ${currentNodeForGroups?.name || ''}`"
+      width="560px"
+      class="xui-custom-dialog node-groups-dialog"
+    >
+      <div v-if="currentNodeForGroups" class="node-groups-modal-inner">
+        <!-- 节点基本信息横幅 -->
+        <div class="node-meta-banner">
+          <div class="nmb-type-badge">{{ currentNodeForGroups.type?.toUpperCase() }}</div>
+          <div class="nmb-info">
+            <div class="nmb-name">{{ currentNodeForGroups.name }}</div>
+            <div class="nmb-server">{{ currentNodeForGroups.server }}:{{ currentNodeForGroups.port || currentNodeForGroups.ports }}</div>
+          </div>
+        </div>
+
+        <!-- 搜索与快捷操作栏 -->
+        <div class="ng-action-bar">
+          <el-input
+            v-model="nodeGroupsSearchQuery"
+            placeholder="搜索策略组名称或类型..."
+            clearable
+            size="small"
+            style="flex: 1;"
+          >
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <div class="ng-quick-btns">
+            <button type="button" class="ng-btn-text" @click="selectAllGroupsForNode">全选</button>
+            <button type="button" class="ng-btn-text" @click="selectedGroupNamesForNode = []">清空</button>
+            <button type="button" class="ng-btn-text" @click="invertGroupsForNode">反选</button>
+          </div>
+        </div>
+
+        <!-- 策略组勾选列表 -->
+        <div class="ng-list-scroll">
+          <div
+            v-for="grp in filteredGroupsForNodeModal"
+            :key="grp.name"
+            class="ng-group-row"
+            @click="toggleGroupForNode(grp.name)"
+          >
+            <el-checkbox
+              :model-value="selectedGroupNamesForNode.includes(grp.name)"
+              @click.stop
+              @change="toggleGroupForNode(grp.name)"
+            />
+            <div class="ng-row-main">
+              <span class="ng-row-name">{{ grp.name }}</span>
+              <span class="ng-row-type">{{ grp.type }}</span>
+            </div>
+            <div class="ng-row-meta">
+              共 {{ (grp.proxies || []).length }} 个节点
+            </div>
+          </div>
+
+          <div v-if="filteredGroupsForNodeModal.length === 0" class="ng-empty-tip">
+            未找到匹配的策略组
+          </div>
+        </div>
+
+        <div class="ng-footer-summary">
+          当前已选中 <strong>{{ selectedGroupNamesForNode.length }}</strong> / {{ editorGroups.length }} 个策略组
+        </div>
+      </div>
+
+      <template #footer>
+        <button class="xui-std-btn" @click="nodeGroupsModalVisible = false">取消</button>
+        <button class="xui-primary-btn" style="margin-left: 8px;" @click="confirmSaveNodeGroups">
+          保存策略组配置
         </button>
       </template>
     </el-dialog>
@@ -2610,6 +2716,86 @@ const isPortHopNode = computed(() => {
   const hasHop = rawHop !== undefined && rawHop !== null && rawHop !== ''
   return p.includes('-') || p.includes(',') || ps.includes('-') || ps.includes(',') || hasHop
 })
+
+// 添加节点时要添加到的策略组
+const newNodeTargetGroupNames = ref([])
+
+// 单节点增减所属策略组弹窗状态
+const nodeGroupsModalVisible = ref(false)
+const currentNodeForGroups = ref(null)
+const selectedGroupNamesForNode = ref([])
+const nodeGroupsSearchQuery = ref('')
+
+const filteredGroupsForNodeModal = computed(() => {
+  const q = nodeGroupsSearchQuery.value.trim().toLowerCase()
+  if (!q) return editorGroups.value
+  return editorGroups.value.filter(g =>
+    (g.name || '').toLowerCase().includes(q) ||
+    (g.type || '').toLowerCase().includes(q)
+  )
+})
+
+const openNodeGroupsModal = (node) => {
+  currentNodeForGroups.value = node
+  nodeGroupsSearchQuery.value = ''
+  selectedGroupNamesForNode.value = editorGroups.value
+    .filter(g => (g.proxies || []).includes(node.name))
+    .map(g => g.name)
+  nodeGroupsModalVisible.value = true
+}
+
+const toggleGroupForNode = (grpName) => {
+  const idx = selectedGroupNamesForNode.value.indexOf(grpName)
+  if (idx !== -1) {
+    selectedGroupNamesForNode.value.splice(idx, 1)
+  } else {
+    selectedGroupNamesForNode.value.push(grpName)
+  }
+}
+
+const selectAllGroupsForNode = () => {
+  const currentSet = new Set(selectedGroupNamesForNode.value)
+  filteredGroupsForNodeModal.value.forEach(g => currentSet.add(g.name))
+  selectedGroupNamesForNode.value = Array.from(currentSet)
+}
+
+const invertGroupsForNode = () => {
+  const currentSet = new Set(selectedGroupNamesForNode.value)
+  filteredGroupsForNodeModal.value.forEach(g => {
+    if (currentSet.has(g.name)) {
+      currentSet.delete(g.name)
+    } else {
+      currentSet.add(g.name)
+    }
+  })
+  selectedGroupNamesForNode.value = Array.from(currentSet)
+}
+
+const confirmSaveNodeGroups = () => {
+  const node = currentNodeForGroups.value
+  if (!node) return
+  const nodeName = node.name
+  const targetSet = new Set(selectedGroupNamesForNode.value)
+
+  let added = 0
+  let removed = 0
+
+  editorGroups.value.forEach(g => {
+    if (!g.proxies) g.proxies = []
+    const has = g.proxies.includes(nodeName)
+    const shouldHave = targetSet.has(g.name)
+    if (shouldHave && !has) {
+      g.proxies.push(nodeName)
+      added++
+    } else if (!shouldHave && has) {
+      g.proxies = g.proxies.filter(p => p !== nodeName)
+      removed++
+    }
+  })
+
+  nodeGroupsModalVisible.value = false
+  ElMessage.success(`已更新节点「${nodeName}」所属策略组 (当前属于 ${targetSet.size} 个组)`)
+}
 let oldEditingNodeName = ''
 
 // 节点列表多选状态
@@ -4179,6 +4365,8 @@ const openAddNodeModal = () => {
     'hop-interval': '',
     sub_source: defaultSubSource
   }
+  // 默认勾选所有策略组
+  newNodeTargetGroupNames.value = editorGroups.value.map(g => g.name)
   editNodeModalVisible.value = true
 }
 
@@ -4203,6 +4391,9 @@ const openEditNodeDetail = (node) => {
 
   copy.sub_source = copy.sub_source || getNodeSubSource(node)
   currentNodeForm.value = copy
+  newNodeTargetGroupNames.value = editorGroups.value
+    .filter(g => (g.proxies || []).includes(node.name))
+    .map(g => g.name)
   editNodeModalVisible.value = true
 }
 
@@ -4223,8 +4414,19 @@ const confirmSaveNode = async () => {
         parsedNode.sub_source = activeProxySourceTab.value === 'ALL' ? '自建节点' : activeProxySourceTab.value
       }
       editorProxies.value.unshift(parsedNode)
+      // 添加到选中的策略组
+      if (newNodeTargetGroupNames.value.length > 0) {
+        editorGroups.value.forEach(g => {
+          if (newNodeTargetGroupNames.value.includes(g.name)) {
+            if (!g.proxies) g.proxies = []
+            if (!g.proxies.includes(parsedNode.name)) {
+              g.proxies.push(parsedNode.name)
+            }
+          }
+        })
+      }
       editNodeModalVisible.value = false
-      ElMessage.success(`成功解析并添加节点: ${parsedNode.name}`)
+      ElMessage.success(`成功解析并添加节点: ${parsedNode.name}，并加入 ${newNodeTargetGroupNames.value.length} 个策略组`)
     } catch (err) {
       ElMessage.error(err.response?.data?.detail || err.message || '解析节点链接失败')
     }
@@ -4279,21 +4481,38 @@ const confirmSaveNode = async () => {
       editorProxies.value[idx] = cleanNode
     }
     // 如果重命名了节点，同步更新策略组引用
-    if (oldEditingNodeName !== cleanNode.name) {
-      editorGroups.value.forEach(g => {
-        if (g.proxies) {
-          g.proxies = g.proxies.map(p => (p === oldEditingNodeName ? cleanNode.name : p))
-        }
-      })
-    }
-    ElMessage.success('节点参数已更新')
+    // 同步更新策略组引用与增减所属策略组
+    editorGroups.value.forEach(g => {
+      if (!g.proxies) g.proxies = []
+      if (oldEditingNodeName !== cleanNode.name) {
+        g.proxies = g.proxies.map(p => (p === oldEditingNodeName ? cleanNode.name : p))
+      }
+      const shouldHave = newNodeTargetGroupNames.value.includes(g.name)
+      const has = g.proxies.includes(cleanNode.name)
+      if (shouldHave && !has) {
+        g.proxies.push(cleanNode.name)
+      } else if (!shouldHave && has) {
+        g.proxies = g.proxies.filter(p => p !== cleanNode.name)
+      }
+    })
+    ElMessage.success('节点参数及所属策略组已更新')
   } else {
     if (editorProxies.value.some(p => p.name === cleanNode.name)) {
       ElMessage.warning('节点名称已存在，请使用不同名称')
       return
     }
     editorProxies.value.unshift(cleanNode)
-    ElMessage.success('成功添加新节点')
+    if (newNodeTargetGroupNames.value.length > 0) {
+      editorGroups.value.forEach(g => {
+        if (newNodeTargetGroupNames.value.includes(g.name)) {
+          if (!g.proxies) g.proxies = []
+          if (!g.proxies.includes(cleanNode.name)) {
+            g.proxies.push(cleanNode.name)
+          }
+        }
+      })
+    }
+    ElMessage.success(`成功添加节点: ${cleanNode.name}，并加入 ${newNodeTargetGroupNames.value.length} 个策略组`)
   }
   editNodeModalVisible.value = false
 }
@@ -6409,6 +6628,265 @@ const handleDeleteSource = async (id) => {
   cursor: wait;
 }
 
+
+/* 要添加到的策略组选择区 */
+.target-groups-select-section {
+  margin-top: 14px;
+  border-top: 1px solid #242936;
+  padding-top: 12px;
+}
+
+.tg-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.tg-section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tg-count-badge {
+  font-size: 11px;
+  background: rgba(33, 89, 211, 0.2);
+  color: #60a5fa;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.tg-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tg-link-btn {
+  background: transparent;
+  border: none;
+  color: #38bdf8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: all 0.15s ease;
+}
+
+.tg-link-btn:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.tg-checkbox-scroll {
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid #282d3b;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.tg-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 12px;
+}
+
+.tg-cb-label {
+  font-size: 12px;
+  color: #cbd5e1;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tg-empty-tip {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+/* 所属策略组胶囊悬停交互效果 */
+.groups-included-pill.clickable {
+  cursor: pointer !important;
+  user-select: none;
+  transition: all 0.18s ease !important;
+}
+
+.groups-included-pill.clickable:hover {
+  background-color: rgba(33, 89, 211, 0.22) !important;
+  border-color: #2159d3 !important;
+  color: #60a5fa !important;
+  transform: translateY(-1px);
+}
+
+.groups-included-pill.clickable:active {
+  transform: translateY(0);
+}
+
+/* 单节点增减策略组弹窗 */
+.node-groups-dialog .el-dialog__body {
+  padding: 16px 20px !important;
+}
+
+.node-meta-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #242936;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.nmb-type-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(33, 89, 211, 0.25);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  letter-spacing: 0.5px;
+}
+
+.nmb-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.nmb-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nmb-server {
+  font-size: 11px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.ng-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ng-quick-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ng-btn-text {
+  background: transparent;
+  border: none;
+  color: #38bdf8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.15s ease;
+}
+
+.ng-btn-text:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.ng-list-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #242936;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ng-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ng-group-row:last-child {
+  border-bottom: none;
+}
+
+.ng-group-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+
+
+.ng-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ng-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ng-row-type {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.ng-row-meta {
+  font-size: 11px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.ng-empty-tip {
+  padding: 30px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ng-footer-summary {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.ng-footer-summary strong {
+  color: #38bdf8;
+}
+
 </style>
 
 <!-- 全局重载 Element Plus 弹窗与表格，彻底消除图3图4的割裂感 -->
@@ -8238,4 +8716,6 @@ const handleDeleteSource = async (id) => {
     padding: 20px 10px !important;
   }
 }
+
+/* 要添加到的策略组选择区 */
 </style>
