@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..config import DEFAULT_TEST_URL
 from ..yaml_manager import YamlManager
 from ..sub_fetcher import SubscriptionFetcher
-from ..node_tester import test_and_filter_nodes_session
+from ..node_tester import test_and_filter_nodes_session, is_ad_or_fake_node
 
 router = APIRouter(prefix="/api/nodes", tags=["Nodes"])
 
@@ -17,9 +17,32 @@ router = APIRouter(prefix="/api/nodes", tags=["Nodes"])
 class FetchNodesRequest(BaseModel):
     url: str = Field(..., description="要提取的外部订阅链接")
     profile_name: str = Field(..., description="作为对比的目标母本名称")
+    source_name: Optional[str] = Field(default=None, description="所属订阅源名称")
     custom_ua: Optional[str] = Field(default=None, description="自定义 User-Agent")
     filter_dead: Optional[bool] = Field(default=True, description="是否自动剔除没有延迟的节点")
     test_url: Optional[str] = Field(default=None, description="自定义测速/测延迟接口 URL")
+
+
+def resolve_sub_source_name(req_source_name: Optional[str], url: str) -> str:
+    """智能解析提取节点的所属订阅源名称"""
+    if req_source_name and req_source_name.strip():
+        return req_source_name.strip()
+    try:
+        from .sources import load_sources
+        for s in load_sources():
+            if s.get("url", "").strip() == url.strip():
+                if s.get("name"):
+                    return str(s["name"]).strip()
+    except Exception:
+        pass
+    try:
+        import urllib.parse
+        host = urllib.parse.urlparse(url).netloc
+        if host:
+            return host
+    except Exception:
+        pass
+    return "外部订阅"
 
 
 class ImportNodesRequest(BaseModel):
@@ -108,61 +131,79 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                 available_groups = summary.get("groups", [])
                 active_test_url = (req.test_url.strip() if req.test_url and req.test_url.strip() else None) or summary.get("test_url") or DEFAULT_TEST_URL
 
-                if req.filter_dead:
-                    await queue.put({
-                        "type": "progress",
-                        "step": 3,
-                        "percent": 45,
-                        "msg": "正在启动 Mihomo 核心并构建并发探测隧道...",
-                        "total_raw": total_raw,
-                        "alive_count": 0,
-                        "filtered_count": 0,
-                        "stage": "starting_core"
-                    })
+                await queue.put({
+                    "type": "progress",
+                    "step": 3,
+                    "percent": 45,
+                    "msg": "正在启动 Mihomo 核心并构建并发探测隧道...",
+                    "total_raw": total_raw,
+                    "alive_count": 0,
+                    "filtered_count": 0,
+                    "stage": "starting_core"
+                })
 
-                    last_reported_time = [0.0]
+                last_reported_time = [0.0]
 
-                    async def on_delay_progress(comp, tot, alive):
-                        now = time.time()
-                        if comp == tot or (now - last_reported_time[0]) >= 0.08:
-                            last_reported_time[0] = now
-                            pct = 45 + int((comp / max(1, tot)) * 45)
-                            filtered = comp - alive
-                            await queue.put({
-                                "type": "progress",
-                                "step": 3,
-                                "percent": pct,
-                                "msg": f"并发延迟探测中: {comp}/{tot} (有效 {alive}，已过滤 {filtered})",
-                                "total_raw": total_raw,
-                                "alive_count": alive,
-                                "filtered_count": filtered,
-                                "completed": comp,
-                                "stage": "probing"
-                            })
+                async def on_delay_progress(comp, tot, alive):
+                    now = time.time()
+                    if comp == tot or (now - last_reported_time[0]) >= 0.08:
+                        last_reported_time[0] = now
+                        pct = 45 + int((comp / max(1, tot)) * 45)
+                        filtered = comp - alive
+                        await queue.put({
+                            "type": "progress",
+                            "step": 3,
+                            "percent": pct,
+                            "msg": f"并发延迟探测中: {comp}/{tot} (有效 {alive}，已过滤 {filtered})",
+                            "total_raw": total_raw,
+                            "alive_count": alive,
+                            "filtered_count": filtered,
+                            "completed": comp,
+                            "stage": "probing"
+                        })
 
-                    valid_nodes = await test_and_filter_nodes_session(
-                        raw_nodes,
-                        test_url=active_test_url,
-                        concurrency=25,
-                        timeout=3.5,
-                        filter_dead=True,
-                        on_progress=on_delay_progress
-                    )
-                else:
-                    valid_nodes = raw_nodes
+                # 并发执行真实延迟测试（保留全部节点，以便前端可在“本次提取(全部)”和“有效可用”卡片间切换查看）
+                await test_and_filter_nodes_session(
+                    raw_nodes,
+                    test_url=active_test_url,
+                    concurrency=25,
+                    timeout=3.5,
+                    filter_dead=False,
+                    on_progress=on_delay_progress
+                )
 
-                filtered_out_count = total_raw - len(valid_nodes)
                 processed_nodes = []
                 new_count = 0
                 existing_count = 0
+                alive_count = 0
+                filtered_count = 0
+                resolved_sub_source = resolve_sub_source_name(req.source_name, req.url)
 
-                for idx, node in enumerate(valid_nodes):
+                for idx, node in enumerate(raw_nodes):
                     name = str(node.get("name", f"Node-{idx+1}"))
                     is_existing = name in existing_names
                     if is_existing:
                         existing_count += 1
                     else:
                         new_count += 1
+
+                    # 附带订阅源归属字段
+                    node_sub = str(node.get("sub_source") or resolved_sub_source)
+                    node["sub_source"] = node_sub
+
+                    delay = node.get("delay", -1)
+                    is_ad = is_ad_or_fake_node(node)
+                    is_alive = (not is_ad) and (delay > 0)
+                    is_filtered = not is_alive
+                    filter_reason = "广告/非节点" if is_ad else ("超时" if delay <= 0 else "")
+
+                    node["is_filtered"] = is_filtered
+                    node["filter_reason"] = filter_reason
+
+                    if is_alive:
+                        alive_count += 1
+                    else:
+                        filtered_count += 1
 
                     p_type = str(node.get("type", "unknown")).lower()
                     if node.get("ports"):
@@ -184,8 +225,11 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                         "proto_display": proto_display,
                         "server": str(node.get("server", "")),
                         "port": str(node.get("ports") or node.get("port") or ""),
-                        "delay": node.get("delay", 0),
+                        "delay": delay,
+                        "is_filtered": is_filtered,
+                        "filter_reason": filter_reason,
                         "is_existing": is_existing,
+                        "sub_source": node_sub,
                         "raw": node
                     })
 
@@ -193,11 +237,11 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                     "type": "done",
                     "step": 4,
                     "percent": 100,
-                    "msg": f"提取与延迟过滤完成！共保留 {len(processed_nodes)} 个可用节点",
+                    "msg": f"提取与延迟过滤完成！共 {total_raw} 个原始节点 (有效 {alive_count}，已过滤 {filtered_count})",
                     "total_raw": total_raw,
                     "total": len(processed_nodes),
-                    "alive_count": len(processed_nodes),
-                    "filtered_count": filtered_out_count,
+                    "alive_count": alive_count,
+                    "filtered_count": filtered_count,
                     "new_count": new_count,
                     "existing_count": existing_count,
                     "nodes": processed_nodes,
@@ -257,29 +301,46 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
     available_groups = summary.get("groups", [])
     active_test_url = (req.test_url.strip() if req.test_url and req.test_url.strip() else None) or summary.get("test_url") or DEFAULT_TEST_URL
 
-    if req.filter_dead:
-        valid_nodes = await test_and_filter_nodes_session(
-            raw_nodes,
-            test_url=active_test_url,
-            concurrency=25,
-            timeout=3.5,
-            filter_dead=True
-        )
-    else:
-        valid_nodes = raw_nodes
+    await test_and_filter_nodes_session(
+        raw_nodes,
+        test_url=active_test_url,
+        concurrency=25,
+        timeout=3.5,
+        filter_dead=False
+    )
 
-    filtered_out_count = total_raw - len(valid_nodes)
     processed_nodes = []
     new_count = 0
     existing_count = 0
+    alive_count = 0
+    filtered_count = 0
+    resolved_sub_source = resolve_sub_source_name(req.source_name, req.url)
 
-    for idx, node in enumerate(valid_nodes):
+    for idx, node in enumerate(raw_nodes):
         name = str(node.get("name", f"Node-{idx+1}"))
         is_existing = name in existing_names
         if is_existing:
             existing_count += 1
         else:
             new_count += 1
+
+        # 附带订阅源归属字段
+        node_sub = str(node.get("sub_source") or resolved_sub_source)
+        node["sub_source"] = node_sub
+
+        delay = node.get("delay", -1)
+        is_ad = is_ad_or_fake_node(node)
+        is_alive = (not is_ad) and (delay > 0)
+        is_filtered = not is_alive
+        filter_reason = "广告/非节点" if is_ad else ("超时" if delay <= 0 else "")
+
+        node["is_filtered"] = is_filtered
+        node["filter_reason"] = filter_reason
+
+        if is_alive:
+            alive_count += 1
+        else:
+            filtered_count += 1
 
         p_type = str(node.get("type", "unknown")).lower()
         if node.get("ports"):
@@ -301,15 +362,19 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
             "proto_display": proto_display,
             "server": str(node.get("server", "")),
             "port": str(node.get("ports") or node.get("port") or ""),
-            "delay": node.get("delay", 0),
+            "delay": delay,
+            "is_filtered": is_filtered,
+            "filter_reason": filter_reason,
             "is_existing": is_existing,
+            "sub_source": node_sub,
             "raw": node
         })
 
     return {
         "total_raw": total_raw,
         "total": len(processed_nodes),
-        "filtered_count": filtered_out_count,
+        "alive_count": alive_count,
+        "filtered_count": filtered_count,
         "new_count": new_count,
         "existing_count": existing_count,
         "nodes": processed_nodes,
@@ -328,7 +393,10 @@ def import_selected_nodes(req: ImportNodesRequest):
     nodes_payload = []
     for item in req.nodes:
         if "raw" in item and isinstance(item["raw"], dict):
-            nodes_payload.append(item["raw"])
+            raw_node = item["raw"]
+            if "sub_source" in item and not raw_node.get("sub_source"):
+                raw_node["sub_source"] = item["sub_source"]
+            nodes_payload.append(raw_node)
         elif "name" in item:
             nodes_payload.append(item)
 

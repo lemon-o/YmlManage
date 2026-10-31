@@ -278,9 +278,7 @@
                 内置 Mihomo 官方内核（已开启 Unified Delay 真实延迟算法）与 DoH 直连公网探测真实 RTT 握手延时，消除 TLS 握手干扰，精准识别死节点。
               </span>
             </div>
-            <div class="filter-switch-wrap">
-              <el-checkbox v-model="filterDeadOption" label="自动剔除超时/失效节点" size="small" />
-            </div>
+
           </div>
         </div>
       </section>
@@ -302,24 +300,34 @@
             <div class="m-sub">母本当前包含 {{ currentProxyCount }} 个节点</div>
           </div>
 
-          <div class="xui-metric-box">
+          <div
+            class="xui-metric-box"
+            :class="{ 'clickable-metric': hasFetched && totalRawCount > 0, 'metric-active-tab': hasFetched && totalRawCount > 0 && activeNodePoolFilter === 'all' }"
+            @click="hasFetched && totalRawCount > 0 && (activeNodePoolFilter = 'all')"
+            :title="hasFetched && totalRawCount > 0 ? '点击显示所有提取的原始节点（包含失效/广告节点）' : '等待输入订阅链接并提取节点'"
+          >
             <div class="metric-top">
               <span class="m-title">本次提取</span>
               <el-icon color="#a5b4fc"><Download /></el-icon>
             </div>
             <div class="m-val">{{ totalRawCount }} <span class="m-unit">个原始节点</span></div>
-            <div class="m-sub" v-if="filteredCount > 0" style="color: #f87171;">
+            <div class="m-sub" v-if="filteredCount > 0">
               已自动过滤 {{ filteredCount }} 个失效/广告
             </div>
             <div class="m-sub" v-else>等待输入订阅链接</div>
           </div>
 
-          <div class="xui-metric-box">
+          <div
+            class="xui-metric-box"
+            :class="{ 'clickable-metric': hasFetched && totalRawCount > 0, 'metric-active-tab': hasFetched && totalRawCount > 0 && activeNodePoolFilter === 'available' }"
+            @click="hasFetched && totalRawCount > 0 && (activeNodePoolFilter = 'available')"
+            :title="hasFetched && totalRawCount > 0 ? '点击只显示有效可用节点' : '等待输入订阅链接并提取节点'"
+          >
             <div class="metric-top">
               <span class="m-title">有效可用</span>
               <el-icon color="#3fb950"><CircleCheck /></el-icon>
             </div>
-            <div class="m-val text-green">{{ fetchedNodes.length }} <span class="m-unit">可用</span></div>
+            <div class="m-val text-green">{{ aliveNodesCount }} <span class="m-unit">可用</span></div>
             <div class="m-sub">经 NekoBox 同款 URL Test 验证存活</div>
           </div>
 
@@ -460,7 +468,7 @@
                     class="node-delay-pill"
                     :class="getDelayClass(node.delay)"
                   >
-                    {{ node.delay > 0 ? `${node.delay} ms` : '超时' }}
+                    {{ (node.is_filtered && node.filter_reason) ? node.filter_reason : (node.delay > 0 ? `${node.delay} ms` : '超时') }}
                   </span>
                 </div>
               </div>
@@ -985,7 +993,28 @@
               >
                 <template #prefix><el-icon><Search /></el-icon></template>
               </el-input>
-              <span class="tb-count-text">共 {{ filteredEditorProxies.length }} / {{ editorProxies.length }} 个节点</span>
+              <span class="tb-count-text">
+                共 {{ filteredEditorProxies.length }} / {{ currentTabProxies.length }} 个节点
+                <span v-if="selectedEditorNodeNames.length > 0" class="selected-count-pill">
+                  (已选 {{ selectedEditorNodeNames.length }} 个)
+                </span>
+              </span>
+              <button
+                v-if="selectedEditorNodeNames.length > 0"
+                type="button"
+                class="tb-fast-link"
+                @click="deselectAllEditorProxies"
+              >
+                取消选择
+              </button>
+              <button
+                v-else-if="filteredEditorProxies.length > 0"
+                type="button"
+                class="tb-fast-link"
+                @click="selectAllFilteredEditorProxies"
+              >
+                全选
+              </button>
             </div>
             <div class="editor-toolbar-right">
               <button class="xui-std-btn btn-sm" :disabled="testingProfileDelays" @click="handleTestAllProfileNodesDelay">
@@ -997,30 +1026,66 @@
                 <el-icon><Plus /></el-icon>
                 <span>添加节点</span>
               </button>
+
+              <!-- 未选中任何节点时：显示【清空所有节点】或【清空当前页签节点】 -->
               <el-popconfirm
-                title="确定清空母本中所有节点吗？（不可撤销）"
-                @confirm="handleClearAllProxies"
+                v-if="selectedEditorNodeNames.length === 0"
+                :title="activeProxySourceTab === 'ALL' ? '确定清空母本中所有节点吗？（不可撤销）' : `确定清空【${activeProxySourceTab}】下的所有节点吗？（共 ${currentTabProxies.length} 个节点，不可撤销）`"
+                @confirm="handleClearCurrentTabProxies"
               >
                 <template #reference>
-                  <button class="xui-std-btn btn-sm danger-btn">清空所有节点</button>
+                  <button class="xui-std-btn btn-sm danger-btn">
+                    {{ activeProxySourceTab === 'ALL' ? '清空所有节点' : '清空当前页签节点' }}
+                  </button>
+                </template>
+              </el-popconfirm>
+
+              <!-- 多选/单选节点后：【清空所有节点】变为【删除选中节点】 -->
+              <el-popconfirm
+                v-else
+                :title="`确定删除选中的 ${selectedEditorNodeNames.length} 个节点吗？将同步从策略组中移除`"
+                @confirm="handleDeleteSelectedProxies"
+              >
+                <template #reference>
+                  <button class="xui-std-btn btn-sm danger-btn active-delete-btn">
+                    <el-icon style="margin-right: 4px;"><Delete /></el-icon>
+                    <span>删除选中节点 ({{ selectedEditorNodeNames.length }})</span>
+                  </button>
                 </template>
               </el-popconfirm>
             </div>
           </div>
 
-          <!-- 节点卡片网格 -->
+          <!-- 订阅源筛选页签 (第一项固定为【全部】，后续项根据节点所属订阅源自动生成) -->
+          <div class="editor-source-tabs-bar">
+            <button
+              v-for="tab in availableProxySourceTabs"
+              :key="tab.value"
+              type="button"
+              class="source-pill-tab"
+              :class="{ active: activeProxySourceTab === tab.value }"
+              @click="activeProxySourceTab = tab.value"
+            >
+              <span>{{ tab.label }}</span>
+              <span class="source-pill-badge">{{ tab.count }}</span>
+            </button>
+          </div>
+
+          <!-- 节点卡片网格 (支持多选/单选，边框 #2159d3 描边) -->
           <div class="proxies-cards-grid">
             <div
               v-for="(node, nIdx) in filteredEditorProxies"
               :key="node.name + '_' + nIdx"
               class="editor-node-card"
+              :class="{ 'is-selected': isEditorNodeSelected(node.name) }"
+              @click="toggleEditorNodeSelection(node.name)"
             >
               <div class="n-card-top">
                 <span class="node-protocol-tag" :class="'proto-' + (node.type || 'unknown')">
                   {{ node.ports ? (node['hop-interval'] ? `${node.type} (跳跃 ${node['hop-interval']}s)` : `${node.type} (跳跃)`) : (node.type || 'custom') }}
                 </span>
-                <div class="n-card-actions">
-                  <button class="n-icon-btn edit" title="编辑节点" @click="openEditNodeDetail(node)">
+                <div class="n-card-actions" @click.stop>
+                  <button class="n-icon-btn edit" title="编辑节点" @click.stop="openEditNodeDetail(node)">
                     <el-icon><Edit /></el-icon>
                   </button>
                   <el-popconfirm
@@ -1028,7 +1093,7 @@
                     @confirm="handleDeleteProxy(node.name)"
                   >
                     <template #reference>
-                      <button class="n-icon-btn delete" title="删除节点">
+                      <button class="n-icon-btn delete" title="删除节点" @click.stop>
                         <el-icon><Delete /></el-icon>
                       </button>
                     </template>
@@ -1096,7 +1161,8 @@
           </div>
           <YamlCodeEditor
             v-model="rawYamlContent"
-            height="520px"
+            :profile-name="editorProfileName"
+            height="560px"
             placeholder="正在加载 YAML 源码..."
           />
         </div>
@@ -1248,18 +1314,16 @@
               v-model="currentNodeForm['hop-interval']"
               type="number"
               min="1"
-              placeholder="未设置时留空；填写数值生效，删除数值后自动删除此参数"
-              clearable
-            >
-              <template #prepend>
-                <el-icon><Odometer /></el-icon>
-              </template>
-              <template #append>秒</template>
-            </el-input>
+            />
           </el-form-item>
-          <el-form-item label="密码 / UUID / 密钥">
-            <el-input v-model="currentNodeForm.password" placeholder="密码或 UUID" />
-          </el-form-item>
+          <div class="form-cols-2">
+            <el-form-item label="所属订阅源">
+              <el-input v-model="currentNodeForm.sub_source" placeholder="例如: 飞鸟云 / 自建节点" />
+            </el-form-item>
+            <el-form-item label="密码 / UUID / 密钥">
+              <el-input v-model="currentNodeForm.password" placeholder="密码或 UUID" />
+            </el-form-item>
+          </div>
           <div class="form-cols-2">
             <el-form-item label="SNI / ServerName (选填)">
               <el-input v-model="currentNodeForm.sni" placeholder="例如: example.com" />
@@ -2158,7 +2222,7 @@ const finishFetchAndCloseDialog = () => {
     fetchAutoCloseTimer = null
   }
   fetchProgressVisible.value = false
-  selectOnlyNew()
+  selectedNodeIds.value = []
 }
 
 // 导入抽屉与持久化
@@ -2524,27 +2588,164 @@ const isPortHopNode = computed(() => {
 })
 let oldEditingNodeName = ''
 
+// 节点列表多选状态
+const selectedEditorNodeNames = ref([])
+
+const isEditorNodeSelected = (nodeName) => {
+  return selectedEditorNodeNames.value.includes(nodeName)
+}
+
+const toggleEditorNodeSelection = (nodeName) => {
+  const idx = selectedEditorNodeNames.value.indexOf(nodeName)
+  if (idx > -1) {
+    selectedEditorNodeNames.value.splice(idx, 1)
+  } else {
+    selectedEditorNodeNames.value.push(nodeName)
+  }
+}
+
+const selectAllFilteredEditorProxies = () => {
+  selectedEditorNodeNames.value = filteredEditorProxies.value.map(p => p.name)
+}
+
+const deselectAllEditorProxies = () => {
+  selectedEditorNodeNames.value = []
+}
+
+const handleDeleteSelectedProxies = () => {
+  if (selectedEditorNodeNames.value.length === 0) return
+  const toDelete = new Set(selectedEditorNodeNames.value)
+  const count = toDelete.size
+
+  editorProxies.value = editorProxies.value.filter(p => !toDelete.has(p.name))
+
+  editorGroups.value.forEach(g => {
+    if (g.proxies) {
+      g.proxies = g.proxies.filter(p => !toDelete.has(p))
+    }
+  })
+
+  selectedEditorNodeNames.value = []
+  ElMessage.success(`已删除 ${count} 个选中节点`)
+}
+
 const filteredEditorGroups = computed(() => {
   const q = groupSearchQuery.value.trim().toLowerCase()
   if (!q) return editorGroups.value
   return editorGroups.value.filter(g => (g.name || '').toLowerCase().includes(q) || (g.type || '').toLowerCase().includes(q))
 })
 
+// 获取节点的订阅源名称
+const getNodeSubSource = (node) => {
+  if (!node) return '自建节点'
+  const explicit = node.sub_source || node.source || node.subscription || node.sub_name
+  if (explicit && String(explicit).trim()) {
+    return String(explicit).trim()
+  }
+  const s = String(node.server || '').toLowerCase()
+  if (s.includes('344211') || s.includes('xyz')) {
+    return '飞鸟云'
+  }
+  if (s.includes('lemjoo')) {
+    return '自建节点'
+  }
+  return '自建节点'
+}
+
+// 当前选中的订阅源筛选页签（默认 'ALL' 全部）
+const activeProxySourceTab = ref('ALL')
+
+// 根据母本内节点拥有的订阅源名称，自动生成页签列表，第一项固定为【全部】
+const availableProxySourceTabs = computed(() => {
+  const tabs = [
+    {
+      label: '全部',
+      value: 'ALL',
+      count: editorProxies.value.length
+    }
+  ]
+
+  const map = new Map()
+  for (const node of editorProxies.value) {
+    const src = getNodeSubSource(node)
+    map.set(src, (map.get(src) || 0) + 1)
+  }
+
+  for (const [srcName, count] of map.entries()) {
+    tabs.push({
+      label: srcName,
+      value: srcName,
+      count
+    })
+  }
+
+  return tabs
+})
+
+// 切换页签时清空多选状态
+watch(activeProxySourceTab, () => {
+  selectedEditorNodeNames.value = []
+})
+
+// 若当前选中页签因删除节点等原因消失，自动重置为 'ALL' 全部
+watch(availableProxySourceTabs, (tabs) => {
+  if (activeProxySourceTab.value !== 'ALL') {
+    const exists = tabs.some(t => t.value === activeProxySourceTab.value)
+    if (!exists) {
+      activeProxySourceTab.value = 'ALL'
+    }
+  }
+})
+
+// 当前选定页签下的所有节点
+const currentTabProxies = computed(() => {
+  if (activeProxySourceTab.value === 'ALL') {
+    return editorProxies.value
+  }
+  return editorProxies.value.filter(node => getNodeSubSource(node) === activeProxySourceTab.value)
+})
+
+// 在当前页签节点基础上按搜索词过滤
 const filteredEditorProxies = computed(() => {
+  const baseList = currentTabProxies.value
   const q = proxySearchQuery.value.trim().toLowerCase()
-  if (!q) return editorProxies.value
-  return editorProxies.value.filter(p => {
+  if (!q) return baseList
+  return baseList.filter(p => {
     const loc = getNodeLocation(p, ipLocationMap.value)
     return (
       (p.name || '').toLowerCase().includes(q) ||
       (p.type || '').toLowerCase().includes(q) ||
       String(p.server || '').toLowerCase().includes(q) ||
       String(p.port || '').includes(q) ||
+      String(p.ports || '').includes(q) ||
       (loc.text && loc.text.toLowerCase().includes(q)) ||
       (loc.flag && loc.flag.includes(q))
     )
   })
 })
+
+const handleClearCurrentTabProxies = () => {
+  if (activeProxySourceTab.value === 'ALL') {
+    handleClearAllProxies()
+    return
+  }
+  const tabName = activeProxySourceTab.value
+  const toDelete = new Set(currentTabProxies.value.map(p => p.name))
+  const deleteCount = toDelete.size
+  if (deleteCount === 0) return
+
+  editorProxies.value = editorProxies.value.filter(p => !toDelete.has(p.name))
+
+  editorGroups.value.forEach(g => {
+    if (g.proxies) {
+      g.proxies = g.proxies.filter(p => !toDelete.has(p))
+    }
+  })
+
+  activeProxySourceTab.value = 'ALL'
+  selectedEditorNodeNames.value = []
+  ElMessage.success(`已清空【${tabName}】下的 ${deleteCount} 个节点`)
+}
 
 // 代理节点类型映射表（快速查询协议用于渲染标签）
 const proxyTypeMap = computed(() => {
@@ -3250,9 +3451,14 @@ const handleFetchNodes = async () => {
   fetchAbortController = new AbortController()
 
   try {
+    const matchedSource = savedSources.value.find(s => s.id === selectedSourceId.value) ||
+                          savedSources.value.find(s => s.url.trim() === fetchUrl.value.trim())
+    const curSourceName = matchedSource ? matchedSource.name : ''
+
     const response = await api.fetchNodesStream({
       url: fetchUrl.value.trim(),
       profile_name: currentProfile.value,
+      source_name: curSourceName,
       filter_dead: filterDeadOption.value,
       test_url: activeTestUrl.value
     }, fetchAbortController.signal)
@@ -3314,6 +3520,8 @@ const handleFetchNodes = async () => {
       currentGroups.value = finalResult.available_groups || []
       loadSavedGroupSelection()
       hasFetched.value = true
+      activeNodePoolFilter.value = 'available'
+      selectedNodeIds.value = []
 
       if (fetchedNodes.value.length === 0) {
         ElMessage.warning('未提取到有效节点（可能全不可达或超时）')
@@ -3357,9 +3565,21 @@ const sortNodesList = (list, mode) => {
   return arr
 }
 
+// 左侧卡片筛选模式：'available' 默认显示所有可用节点 | 'all' 显示所有原始节点(包含已过滤/失效节点)
+const activeNodePoolFilter = ref('available')
+
+const aliveNodesCount = computed(() => {
+  return fetchedNodes.value.filter(n => !n.is_filtered && n.delay > 0).length
+})
+
 const filteredNodes = computed(() => {
-  const kw = searchKeyword.value.trim().toLowerCase()
   let list = fetchedNodes.value
+  // 根据左侧卡片筛选：仅有效可用 vs 全部原始节点
+  if (activeNodePoolFilter.value === 'available') {
+    list = list.filter(n => !n.is_filtered && n.delay > 0)
+  }
+
+  const kw = searchKeyword.value.trim().toLowerCase()
   if (kw) {
     list = list.filter(n => {
       const loc = getNodeLocation(n, ipLocationMap.value)
@@ -3427,7 +3647,17 @@ const clearAllGroups = () => {
 }
 
 const confirmImport = async () => {
-  const nodesToImport = fetchedNodes.value.filter(n => selectedNodeIds.value.includes(n.id))
+  const matchedSource = savedSources.value.find(s => s.id === selectedSourceId.value) ||
+                        savedSources.value.find(s => s.url.trim() === fetchUrl.value.trim())
+  const curSourceName = matchedSource ? matchedSource.name : ''
+
+  const nodesToImport = fetchedNodes.value.filter(n => selectedNodeIds.value.includes(n.id)).map(n => {
+    const raw = { ...(n.raw || n) }
+    if (!raw.sub_source) {
+      raw.sub_source = n.sub_source || curSourceName || '外部订阅'
+    }
+    return raw
+  })
   if (nodesToImport.length === 0) {
     ElMessage.warning('未选择任何有效节点')
     return
@@ -3566,6 +3796,8 @@ const openProfileEditor = async (name) => {
     groupSearchQuery.value = ''
     proxySearchQuery.value = ''
     nodesToAddToCurrentGroup.value = []
+    selectedEditorNodeNames.value = []
+    activeProxySourceTab.value = 'ALL'
   } catch (err) {
     ElMessage.error('读取母本配置失败: ' + (err.response?.data?.detail || err.message))
   } finally {
@@ -3789,6 +4021,7 @@ const openAddNodeModal = () => {
   isEditingExistingNode.value = false
   nodeAddMode.value = 'link'
   nodeLinkInput.value = ''
+  const defaultSubSource = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
   currentNodeForm.value = {
     name: '',
     type: 'hysteria2',
@@ -3797,7 +4030,8 @@ const openAddNodeModal = () => {
     password: '',
     sni: '',
     'skip-cert-verify': true,
-    'hop-interval': ''
+    'hop-interval': '',
+    sub_source: defaultSubSource
   }
   editNodeModalVisible.value = true
 }
@@ -3821,6 +4055,7 @@ const openEditNodeDetail = (node) => {
     copy['hop-interval'] = ''
   }
 
+  copy.sub_source = copy.sub_source || getNodeSubSource(node)
   currentNodeForm.value = copy
   editNodeModalVisible.value = true
 }
@@ -3837,6 +4072,9 @@ const confirmSaveNode = async () => {
       const parsedNode = res.data.node
       if (editorProxies.value.some(p => p.name === parsedNode.name)) {
         parsedNode.name = `${parsedNode.name}_${Date.now().toString().slice(-4)}`
+      }
+      if (!parsedNode.sub_source) {
+        parsedNode.sub_source = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
       }
       editorProxies.value.unshift(parsedNode)
       editNodeModalVisible.value = false
@@ -3859,6 +4097,11 @@ const confirmSaveNode = async () => {
   }
 
   const cleanNode = { ...f, name: f.name.trim(), server: f.server.trim() }
+  if (cleanNode.sub_source && String(cleanNode.sub_source).trim()) {
+    cleanNode.sub_source = String(cleanNode.sub_source).trim()
+  } else {
+    cleanNode.sub_source = activeProxySourceTab.value === 'ALL' ? (savedSources.value[0]?.name || '自建节点') : activeProxySourceTab.value
+  }
   const portStr = String(f.port || '').trim()
   if (portStr.includes('-') || portStr.includes(',')) {
     cleanNode.ports = portStr
@@ -3911,6 +4154,7 @@ const confirmSaveNode = async () => {
 
 const handleDeleteProxy = (nodeName) => {
   editorProxies.value = editorProxies.value.filter(p => p.name !== nodeName)
+  selectedEditorNodeNames.value = selectedEditorNodeNames.value.filter(n => n !== nodeName)
   // 同步从所有策略组中移除
   editorGroups.value.forEach(g => {
     if (g.proxies) {
@@ -3922,6 +4166,7 @@ const handleDeleteProxy = (nodeName) => {
 
 const handleClearAllProxies = () => {
   editorProxies.value = []
+  selectedEditorNodeNames.value = []
   editorGroups.value.forEach(g => {
     if (g.proxies) {
       g.proxies = g.proxies.filter(p => ['DIRECT', 'REJECT'].includes(p) || editorGroups.value.some(grp => grp.name === p))
@@ -3931,21 +4176,23 @@ const handleClearAllProxies = () => {
 }
 
 const handleTestAllProfileNodesDelay = async () => {
-  if (!editorProxies.value || editorProxies.value.length === 0) {
-    ElMessage.info('母本中暂无可测试的节点')
+  const targetNodes = currentTabProxies.value
+  if (!targetNodes || targetNodes.length === 0) {
+    ElMessage.info('当前页签下暂无可测试的节点')
     return
   }
   testingProfileDelays.value = true
-  ElMessage.info(`正在通过 Mihomo 内核测定 ${editorProxies.value.length} 个节点的 Unified Delay 真实 RTT 延迟...`)
+  const tabLabel = activeProxySourceTab.value === 'ALL' ? '全部' : activeProxySourceTab.value
+  ElMessage.info(`正在通过 Mihomo 内核测定【${tabLabel}】的 ${targetNodes.length} 个节点的 Unified Delay 真实 RTT 延迟...`)
   try {
-    const res = await api.testNodesDelay({ nodes: editorProxies.value })
+    const res = await api.testNodesDelay({ nodes: targetNodes })
     const delays = res.data.delays || {}
-    editorProxies.value.forEach(p => {
+    targetNodes.forEach(p => {
       if (delays[p.name] !== undefined) {
         p.delay = delays[p.name]
       }
     })
-    ElMessage.success(`测延迟完成（共测速 ${res.data.total} 个节点）`)
+    ElMessage.success(`测延迟完成（已更新【${tabLabel}】共 ${res.data.total || targetNodes.length} 个节点的延迟）`)
   } catch (err) {
     ElMessage.error('测试延迟失败: ' + (err.response?.data?.detail || err.message))
   } finally {
@@ -4593,14 +4840,25 @@ const handleDeleteSource = async (id) => {
 
 /* 选中态：完全不需要外部描边，石墨灰微提亮，仅靠右上角蓝圈勾选识别 */
 .xui-node-card.card-selected {
-  background-color: #242731; /* 柔和深石墨微提亮，与卡片沉稳融合 */
-  border-color: #2d3039;    /* 彻底移除外部描边，保持与未选卡片一致的深灰底线 */
+  background-color: #1e2026;
+  border-color: #2d3039;
   box-shadow: none !important;
 }
 
 .xui-node-card.card-selected:hover {
   border-color: #3f4450;
-  background-color: #282c37;
+  background-color: #242730;
+}
+
+.xui-metric-box.metric-active-tab {
+  border-color: #94a3b8 !important;
+  box-shadow: 0 0 0 1px #94a3b8, 0 4px 14px rgba(148, 163, 184, 0.18) !important;
+  background-color: #262932 !important;
+}
+
+.xui-metric-box.metric-active-tab:hover {
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 0 0 1px #cbd5e1, 0 4px 16px rgba(203, 213, 225, 0.22) !important;
 }
 
 .m-btn.m-btn-active {
@@ -6494,6 +6752,71 @@ const handleDeleteSource = async (id) => {
   flex-direction: column;
 }
 
+.editor-source-tabs-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 2px 0;
+}
+
+.source-pill-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid #2a3447;
+  background: #171c26;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.source-pill-tab:hover {
+  background: #1f2736;
+  color: #f1f5f9;
+  border-color: #3e4d69;
+}
+
+.source-pill-tab.active {
+  background: #2159d3;
+  color: #ffffff;
+  border-color: #2159d3;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(33, 89, 211, 0.35);
+}
+
+.source-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  transition: all 0.2s ease;
+}
+
+.source-pill-tab:hover .source-pill-badge {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+}
+
+.source-pill-tab.active .source-pill-badge {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
 .editor-toolbar-row {
   display: flex;
   align-items: center;
@@ -6935,12 +7258,67 @@ const handleDeleteSource = async (id) => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: all 0.2s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
 }
 
 .editor-node-card:hover {
   border-color: #3b4252;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* 选中样式为卡片边框#2159d3描边 */
+.editor-node-card.is-selected {
+  border: 1.5px solid #2159d3 !important;
+  box-shadow: 0 0 0 1px #2159d3, 0 6px 20px rgba(33, 89, 211, 0.28) !important;
+}
+
+.danger-btn {
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+  background-color: rgba(239, 68, 68, 0.08) !important;
+  transition: all 0.15s ease;
+}
+
+.danger-btn:hover {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+  border-color: #ef4444 !important;
+  color: #fca5a5 !important;
+}
+
+.danger-btn.active-delete-btn {
+  background-color: #dc2626 !important;
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.45);
+}
+
+.danger-btn.active-delete-btn:hover {
+  background-color: #b91c1c !important;
+}
+
+.selected-count-pill {
+  color: #38bdf8;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.tb-fast-link {
+  background: transparent;
+  border: none;
+  color: #58a6ff;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 4px;
+  text-decoration: underline;
+  transition: opacity 0.15s ease;
+}
+
+.tb-fast-link:hover {
+  opacity: 0.8;
 }
 
 .n-card-top {

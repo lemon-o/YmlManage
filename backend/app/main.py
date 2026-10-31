@@ -16,7 +16,7 @@ from .routes.auth import extract_token_from_request
 app = FastAPI(
     title="YmlManage - 节点母本维护管理平台",
     description="维护 Clash/Mihomo 母本配置文件，从外部订阅提取节点勾选导入并分发",
-    version="1.4.4"
+    version="1.4.5"
 )
 
 # 允许跨域
