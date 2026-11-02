@@ -2098,7 +2098,7 @@ import {
   FullScreen, Aim
 } from '@element-plus/icons-vue'
 import * as api from './api'
-import { getNodeLocation } from './utils/location'
+import { getNodeLocation, formatNodeNameWithFlag } from './utils/location'
 import YamlCodeEditor from './components/YamlCodeEditor.vue'
 
 // 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
@@ -3638,18 +3638,54 @@ const loadProfiles = async () => {
   }
 }
 
+const currentMasterProxyNames = ref(new Set())
+
 const loadProfileDetail = async (name) => {
   try {
     const res = await api.getProfileDetail(name)
     const data = res.data?.summary || res.data || {}
     currentGroups.value = data.groups || []
     currentProxyCount.value = data.proxy_count || 0
+    currentMasterProxyNames.value = new Set(data.proxy_names || [])
     if (data.test_url) {
       activeTestUrl.value = data.test_url
     }
     loadSavedGroupSelection()
   } catch (err) {
     ElMessage.error('加载母本详情失败')
+  }
+}
+
+// 格式化提取后的节点列表名称（补全国旗代码/汉化2位大写代码）
+const formatNodesListNames = (nodes) => {
+  if (!nodes || !nodes.length) return
+  const masterNames = currentMasterProxyNames.value
+  let existCount = 0
+  let nCount = 0
+
+  nodes.forEach(n => {
+    if (!n) return
+    const curName = n.name || n.raw?.name || ''
+    const formatted = formatNodeNameWithFlag(curName, n, ipLocationMap.value)
+    if (formatted && formatted !== curName) {
+      n.name = formatted
+      if (n.raw) {
+        n.raw.name = formatted
+      }
+    }
+    if (masterNames && masterNames.size > 0) {
+      n.is_existing = masterNames.has(n.name)
+    }
+    if (n.is_existing) {
+      existCount++
+    } else {
+      nCount++
+    }
+  })
+
+  if (masterNames && masterNames.size > 0) {
+    existingCount.value = existCount
+    newCount.value = nCount
   }
 }
 
@@ -3841,8 +3877,12 @@ const handleFetchNodes = async () => {
           }
         })
       }
+      // 提取后立即格式化节点名称：若带有2位国家大写代码则汉化并前置国旗代码；若未带有国旗代码则自动补全国旗代码+空格
+      formatNodesListNames(nodes)
       fetchedNodes.value = nodes
-      resolveMissingLocations(fetchedNodes.value)
+      resolveMissingLocations(fetchedNodes.value).then(() => {
+        formatNodesListNames(fetchedNodes.value)
+      })
       newCount.value = finalResult.new_count || 0
       existingCount.value = finalResult.existing_count || 0
       currentGroups.value = finalResult.available_groups || []
@@ -3988,6 +4028,15 @@ const confirmImport = async () => {
     } else {
       raw.sub_source = '外部订阅'
     }
+
+    // 当节点名称前面没有国旗代码时，自动补全国旗代码+空格
+    const formattedName = formatNodeNameWithFlag(raw.name, raw, ipLocationMap.value)
+    raw.name = formattedName
+    n.name = formattedName
+    if (n.raw) {
+      n.raw.name = formattedName
+    }
+
     return raw
   })
   if (nodesToImport.length === 0) {
@@ -4012,7 +4061,7 @@ const confirmImport = async () => {
     importDrawerVisible.value = false
 
     // 将已导入节点标记为已存在状态，并清空当前已导入的选中卡片
-    const importedIds = new Set(nodesToImport.map(n => n.id))
+    const importedIds = new Set(selectedNodeIds.value)
     fetchedNodes.value.forEach(n => {
       if (importedIds.has(n.id)) {
         n.is_existing = true
@@ -4407,6 +4456,7 @@ const confirmSaveNode = async () => {
     try {
       const res = await api.parseNodeLink(rawLink)
       const parsedNode = res.data.node
+      parsedNode.name = formatNodeNameWithFlag(parsedNode.name, parsedNode, ipLocationMap.value)
       if (editorProxies.value.some(p => p.name === parsedNode.name)) {
         parsedNode.name = `${parsedNode.name}_${Date.now().toString().slice(-4)}`
       }
@@ -4445,6 +4495,9 @@ const confirmSaveNode = async () => {
   }
 
   const cleanNode = { ...f, name: f.name.trim(), server: f.server.trim() }
+  if (!isEditingExistingNode.value) {
+    cleanNode.name = formatNodeNameWithFlag(cleanNode.name, cleanNode, ipLocationMap.value)
+  }
   if (cleanNode.sub_source && String(cleanNode.sub_source).trim()) {
     cleanNode.sub_source = String(cleanNode.sub_source).trim()
   } else {

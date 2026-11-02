@@ -41,7 +41,8 @@ export const EMOJI_FLAG_MAP = {
   '🇵🇹': { code: 'PT', flag: '🇵🇹', text: '葡萄牙' },
   '🇿🇦': { code: 'ZA', flag: '🇿🇦', text: '南非' },
   '🇦🇪': { code: 'AE', flag: '🇦🇪', text: '阿联酋' },
-  '🇨🇳': { code: 'CN', flag: '🇨🇳', text: '中国' }
+  '🇨🇳': { code: 'CN', flag: '🇨🇳', text: '中国' },
+  '🇺🇲': { code: 'US', flag: '🇺🇸', text: '美国' }
 }
 
 // 2. 节点名称与地域代号精准规则列表
@@ -368,3 +369,149 @@ export function getNodeLocation(node, ipCache = {}) {
   // 6. 默认未识别标识
   return fallback
 }
+
+// 2 位国家大写代码与国家信息对照表
+export const CODE_TO_COUNTRY_MAP = {
+  HK: { flag: '🇭🇰', text: '香港', code: 'HK' },
+  TW: { flag: '🇹🇼', text: '台湾', code: 'TW' },
+  JP: { flag: '🇯🇵', text: '日本', code: 'JP' },
+  SG: { flag: '🇸🇬', text: '新加坡', code: 'SG' },
+  US: { flag: '🇺🇸', text: '美国', code: 'US' },
+  KR: { flag: '🇰🇷', text: '韩国', code: 'KR' },
+  GB: { flag: '🇬🇧', text: '英国', code: 'GB' },
+  UK: { flag: '🇬🇧', text: '英国', code: 'GB' },
+  DE: { flag: '🇩🇪', text: '德国', code: 'DE' },
+  FR: { flag: '🇫🇷', text: '法国', code: 'FR' },
+  CA: { flag: '🇨🇦', text: '加拿大', code: 'CA' },
+  AU: { flag: '🇦🇺', text: '澳大利亚', code: 'AU' },
+  RU: { flag: '🇷🇺', text: '俄罗斯', code: 'RU' },
+  IN: { flag: '🇮🇳', text: '印度', code: 'IN' },
+  TH: { flag: '🇹🇭', text: '泰国', code: 'TH' },
+  VN: { flag: '🇻🇳', text: '越南', code: 'VN' },
+  PH: { flag: '🇵🇭', text: '菲律宾', code: 'PH' },
+  MY: { flag: '🇲🇾', text: '马来西亚', code: 'MY' },
+  NL: { flag: '🇳🇱', text: '荷兰', code: 'NL' },
+  TR: { flag: '🇹🇷', text: '土耳其', code: 'TR' },
+  AR: { flag: '🇦🇷', text: '阿根廷', code: 'AR' },
+  BR: { flag: '🇧🇷', text: '巴西', code: 'BR' },
+  MX: { flag: '🇲🇽', text: '墨西哥', code: 'MX' },
+  ID: { flag: '🇮🇩', text: '印尼', code: 'ID' },
+  CH: { flag: '🇨🇭', text: '瑞士', code: 'CH' },
+  SE: { flag: '🇸🇪', text: '瑞典', code: 'SE' },
+  NO: { flag: '🇳🇴', text: '挪威', code: 'NO' },
+  FI: { flag: '🇫🇮', text: '芬兰', code: 'FI' },
+  IE: { flag: '🇮🇪', text: '爱尔兰', code: 'IE' },
+  IT: { flag: '🇮🇹', text: '意大利', code: 'IT' },
+  ES: { flag: '🇪🇸', text: '西班牙', code: 'ES' },
+  PT: { flag: '🇵🇹', text: '葡萄牙', code: 'PT' },
+  ZA: { flag: '🇿🇦', text: '南非', code: 'ZA' },
+  AE: { flag: '🇦🇪', text: '阿联酋', code: 'AE' },
+  CN: { flag: '🇨🇳', text: '中国', code: 'CN' },
+  MO: { flag: '🇲🇴', text: '澳门', code: 'MO' }
+}
+
+/**
+ * 若带有 2 位国家大写代码前缀 (如 "HK 003", "TW 01", "US-01", "SG_01", "HK01")，
+ * 把大写代码汉化，前面再加上国家代码 Emoji (如 "HK 003" -> "🇭🇰 香港 003")
+ * @param {string} origName 
+ * @returns {string|null}
+ */
+export function convertCodePrefix(origName) {
+  if (!origName) return null
+  const codes = Object.keys(CODE_TO_COUNTRY_MAP).join('|')
+  const codeRegex = new RegExp(`^(${codes})(?:([\\s\\-_]+)|(?=[0-9]))(.*)$`, 'i')
+  const match = origName.match(codeRegex)
+  if (!match) return null
+
+  const upperCode = match[1].toUpperCase()
+  const info = CODE_TO_COUNTRY_MAP[upperCode]
+  if (!info) return null
+
+  const sep = match[2] || ' '
+  const rest = (match[3] || '').trim()
+
+  // 如果后续内容本身已经带有该国家中文名或中国，避免重复 (如 'HK 香港01', 'HK 中国 香港')
+  if (rest.startsWith(info.text) || (info.code === 'HK' && rest.startsWith('中国')) || (info.code === 'TW' && rest.startsWith('中国'))) {
+    return `${info.flag} ${rest}`
+  }
+
+  return `${info.flag} ${info.text}${sep}${rest}`
+}
+
+/**
+ * 检查节点名称前面是否已有国旗代码或国家前缀
+ * @param {string} name 节点名称
+ * @returns {boolean}
+ */
+export function hasFlagOrCodePrefix(name) {
+  if (!name) return false
+  const trimmed = String(name).trim()
+
+  // 1. 是否以 Unicode 国旗 Emoji (Regional Indicator 序列，例如 🇭🇰, 🇦🇺, 🇺🇸, 🇺🇲 等) 开头
+  if (/^[\u{1F1E6}-\u{1F1FF}]{2}/u.test(trimmed)) {
+    return true
+  }
+
+  // 2. 是否以 EMOJI_FLAG_MAP 中的任意国旗符号开头
+  for (const flag of Object.keys(EMOJI_FLAG_MAP)) {
+    if (trimmed.startsWith(flag)) {
+      return true
+    }
+  }
+
+  // 3. 是否以 2 位国家大写代码 + (空格/短横线/下划线/数字) 开头，如 "HK 003", "TW 01", "US-01", "SG_01", "HK01"
+  const countryCodes = Array.from(new Set(Object.values(EMOJI_FLAG_MAP).map(v => v.code).concat(['UK', 'MO'])))
+  const codeRegex = new RegExp(`^(${countryCodes.join('|')})(?:[\\s\\-_]|(?=[0-9]))`, 'i')
+  if (codeRegex.test(trimmed)) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * 当节点名称前面没有国旗代码时，自动补全国旗代码+空格；
+ * 若已带有 2 位国家大写代码前缀，把大写代码汉化，前面再加上国家代码
+ * @param {string} name 节点名称
+ * @param {Object} node 节点对象 (包含 name, server 等)
+ * @param {Object} ipCache IP/域名解析缓存字典
+ * @returns {string} 补全/规范化后的节点名称
+ */
+export function formatNodeNameWithFlag(name, node = {}, ipCache = {}) {
+  const origName = String(name || node?.name || '').trim()
+  if (!origName) return origName
+
+  // 1. 如果已经包含国旗 Emoji，但紧跟文字没有空格 (如 "🇭🇰香港01")，规范化补上空格
+  const emojiMatch = origName.match(/^([\u{1F1E6}-\u{1F1FF}]{2})(\S.*)$/u)
+  if (emojiMatch) {
+    return `${emojiMatch[1]} ${emojiMatch[2]}`
+  }
+
+  // 2. 如果已经包含国旗 Emoji 前缀 (如 "🇭🇰 中国 香港-BGP", "🇭🇰 香港01")，不重复添加
+  if (/^[\u{1F1E6}-\u{1F1FF}]{2}/u.test(origName)) {
+    return origName
+  }
+  for (const flag of Object.keys(EMOJI_FLAG_MAP)) {
+    if (origName.startsWith(flag)) {
+      return origName
+    }
+  }
+
+  // 3. 若带有 2 位国家大写代码前缀 (如 "HK 003", "TW 01", "US-01", "SG_01", "HK01")：
+  //    把大写代码汉化，前面再加上国家代码 Emoji (如 "HK 003" -> "🇭🇰 香港 003")
+  const converted = convertCodePrefix(origName)
+  if (converted) {
+    return converted
+  }
+
+  // 4. 解析节点的归属地信息 (针对未带国家代码但含有中文地名/中继名称的节点，如 "香港CF3", "美国CF2", "日本623 中继")
+  const loc = getNodeLocation({ ...node, name: origName }, ipCache)
+
+  // 5. 若成功识别出具体国家/地区且有国旗 Emoji，自动补全国旗 Emoji + 空格
+  if (loc && loc.code !== 'UN' && loc.code !== 'CF' && loc.flag && loc.flag !== '🌐') {
+    return `${loc.flag} ${origName}`
+  }
+
+  return origName
+}
+
