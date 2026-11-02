@@ -58,6 +58,40 @@ class YamlManager:
         profiles.sort(key=lambda x: x["updated_at"], reverse=True)
         return profiles
 
+    @staticmethod
+    def get_node_identity(p: Dict[str, Any]) -> str:
+        """
+        提取不变的节点信息元素生成唯一特征标识（协议 + 服务器地址 + 端口 + 凭证）
+        用于判断节点是否已导入/已存在，不受节点名称重命名或国旗格式化影响
+        """
+        if not isinstance(p, dict):
+            return ""
+        if "raw" in p and isinstance(p["raw"], dict):
+            raw = p["raw"]
+        else:
+            raw = p
+
+        ptype = str(raw.get("type") or p.get("type") or "").strip().lower()
+        server = str(raw.get("server") or p.get("server") or "").strip().lower()
+        if server.startswith("[") and server.endswith("]"):
+            server = server[1:-1]
+        port = str(raw.get("ports") or p.get("ports") or raw.get("port") or p.get("port") or "").strip()
+        if not server or not port:
+            return ""
+
+        cred = str(
+            raw.get("uuid") or p.get("uuid") or 
+            raw.get("password") or p.get("password") or 
+            raw.get("auth_str") or p.get("auth_str") or 
+            raw.get("auth") or p.get("auth") or 
+            raw.get("public-key") or p.get("public-key") or 
+            ""
+        ).strip().lower()
+        
+        if cred:
+            return f"{ptype}://{server}:{port}@{cred}"
+        return f"{ptype}://{server}:{port}"
+
     @classmethod
     def get_profile_summary(cls, profile_name: str) -> Dict[str, Any]:
         """快速提取母本的节点数、策略组列表以及测速与测延迟接口"""
@@ -68,6 +102,7 @@ class YamlManager:
                 "group_count": 0,
                 "groups": [],
                 "proxy_names": [],
+                "proxy_identities": [],
                 "test_url": DEFAULT_TEST_URL
             }
 
@@ -80,9 +115,14 @@ class YamlManager:
             proxy_groups = data.get("proxy-groups") or []
 
             proxy_names = []
+            proxy_identities = []
             for p in proxies:
-                if isinstance(p, dict) and "name" in p:
-                    proxy_names.append(str(p["name"]))
+                if isinstance(p, dict):
+                    if "name" in p:
+                        proxy_names.append(str(p["name"]))
+                    ident = cls.get_node_identity(p)
+                    if ident:
+                        proxy_identities.append(ident)
 
             groups = []
             current_test_url = None
@@ -117,6 +157,7 @@ class YamlManager:
                 "group_count": len(groups),
                 "groups": groups,
                 "proxy_names": proxy_names,
+                "proxy_identities": proxy_identities,
                 "test_url": current_test_url or DEFAULT_TEST_URL
             }
         except Exception as e:
@@ -125,6 +166,7 @@ class YamlManager:
                 "group_count": 0,
                 "groups": [],
                 "proxy_names": [],
+                "proxy_identities": [],
                 "test_url": DEFAULT_TEST_URL,
                 "error": str(e)
             }
@@ -339,11 +381,16 @@ class YamlManager:
             data["proxies"] = []
 
         existing_proxies = data["proxies"]
-        # 建立现存节点名字 -> 下标映射
+        # 建立现存节点名字与不变特征标识 -> 下标映射
         existing_names_map = {}
+        existing_ident_map = {}
         for idx, p in enumerate(existing_proxies):
-            if isinstance(p, dict) and "name" in p:
-                existing_names_map[str(p["name"])] = idx
+            if isinstance(p, dict):
+                if "name" in p:
+                    existing_names_map[str(p["name"])] = idx
+                ident = cls.get_node_identity(p)
+                if ident:
+                    existing_ident_map[ident] = idx
 
         added_count = 0
         updated_count = 0
@@ -357,17 +404,27 @@ class YamlManager:
 
             node_name = str(node["name"])
             imported_node_names.append(node_name)
+            node_ident = cls.get_node_identity(node)
 
-            if node_name in existing_names_map:
+            # 优先根据不变的特征标识匹配，其次根据名称匹配
+            target_idx = None
+            if node_ident and node_ident in existing_ident_map:
+                target_idx = existing_ident_map[node_ident]
+            elif node_name in existing_names_map:
+                target_idx = existing_names_map[node_name]
+
+            if target_idx is not None:
                 if overwrite:
-                    idx = existing_names_map[node_name]
-                    existing_proxies[idx] = node
+                    existing_proxies[target_idx] = node
                     updated_count += 1
                 else:
                     skipped_count += 1
             else:
                 existing_proxies.append(node)
-                existing_names_map[node_name] = len(existing_proxies) - 1
+                new_idx = len(existing_proxies) - 1
+                if node_ident:
+                    existing_ident_map[node_ident] = new_idx
+                existing_names_map[node_name] = new_idx
                 added_count += 1
 
         # 3. 更新目标策略组 proxy-groups

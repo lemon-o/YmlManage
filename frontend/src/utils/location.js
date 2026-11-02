@@ -515,3 +515,36 @@ export function formatNodeNameWithFlag(name, node = {}, ipCache = {}) {
   return origName
 }
 
+/**
+ * 提取不变的节点信息元素生成唯一特征标识（协议 + 服务器地址 + 端口 + 凭证）
+ * 用于跨重命名、国旗补全、格式化等场景精准判断节点是否已导入/已存在
+ * @param {Object} node 节点对象或 raw 代理对象
+ * @returns {string} 节点的不变唯一特征标识
+ */
+export function getNodeIdentityKey(node) {
+  if (!node || typeof node !== 'object') return ''
+  const raw = (node.raw && typeof node.raw === 'object') ? node.raw : node
+  const ptype = String(raw.type || node.type || '').trim().toLowerCase()
+  let server = String(raw.server || node.server || '').trim().toLowerCase()
+  if (server.startsWith('[') && server.endsWith(']')) {
+    server = server.slice(1, -1)
+  }
+  const port = String(raw.ports || node.ports || raw.port || node.port || '').trim()
+  if (!server || !port) return ''
+
+  const cred = String(
+    raw.uuid || node.uuid ||
+    raw.password || node.password ||
+    raw.auth_str || node.auth_str ||
+    raw.auth || node.auth ||
+    raw['public-key'] || node['public-key'] ||
+    ''
+  ).trim().toLowerCase()
+
+  if (cred) {
+    return `${ptype}://${server}:${port}@${cred}`
+  }
+  return `${ptype}://${server}:${port}`
+}
+
+

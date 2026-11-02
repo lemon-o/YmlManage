@@ -352,10 +352,8 @@
       <section class="xui-card-panel" v-if="hasFetched">
         <div class="panel-head-bar">
           <div class="panel-head-title-flex">
-            <span>有效节点卡片池</span>
+            <span>{{ activeNodePoolFilter === 'all' ? '原始节点' : '有效节点' }}</span>
             <span class="panel-num-pill">{{ filteredNodes.length }}</span>
-
-
           </div>
 
           <div class="panel-head-actions">
@@ -449,7 +447,7 @@
 
                 <div class="card-top-right">
                   <span v-if="node.is_existing" class="tag-in-master">
-                    已存在
+                    已导入
                   </span>
                   <!-- 未选中不显示，选中仅在右上角显示圆形里面一个√ -->
                   <div v-if="isNodeSelected(node.id)" class="circle-check-badge">
@@ -2098,7 +2096,7 @@ import {
   FullScreen, Aim
 } from '@element-plus/icons-vue'
 import * as api from './api'
-import { getNodeLocation, formatNodeNameWithFlag } from './utils/location'
+import { getNodeLocation, formatNodeNameWithFlag, getNodeIdentityKey } from './utils/location'
 import YamlCodeEditor from './components/YamlCodeEditor.vue'
 
 // 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
@@ -3639,6 +3637,7 @@ const loadProfiles = async () => {
 }
 
 const currentMasterProxyNames = ref(new Set())
+const currentMasterProxyIdentities = ref(new Set())
 
 const loadProfileDetail = async (name) => {
   try {
@@ -3647,10 +3646,15 @@ const loadProfileDetail = async (name) => {
     currentGroups.value = data.groups || []
     currentProxyCount.value = data.proxy_count || 0
     currentMasterProxyNames.value = new Set(data.proxy_names || [])
+    currentMasterProxyIdentities.value = new Set(data.proxy_identities || [])
     if (data.test_url) {
       activeTestUrl.value = data.test_url
     }
     loadSavedGroupSelection()
+    // 若当前已有提取出的节点列表，重新校准一次已导入标记与统计数
+    if (fetchedNodes.value && fetchedNodes.value.length) {
+      formatNodesListNames(fetchedNodes.value)
+    }
   } catch (err) {
     ElMessage.error('加载母本详情失败')
   }
@@ -3660,6 +3664,7 @@ const loadProfileDetail = async (name) => {
 const formatNodesListNames = (nodes) => {
   if (!nodes || !nodes.length) return
   const masterNames = currentMasterProxyNames.value
+  const masterIdents = currentMasterProxyIdentities.value
   let existCount = 0
   let nCount = 0
 
@@ -3673,7 +3678,13 @@ const formatNodesListNames = (nodes) => {
         n.raw.name = formatted
       }
     }
-    if (masterNames && masterNames.size > 0) {
+    // 优先基于不变的节点信息元素(协议+服务器地址+端口+凭证)判断是否已导入
+    const ident = getNodeIdentityKey(n)
+    if (ident && masterIdents && masterIdents.size > 0) {
+      n.is_existing = masterIdents.has(ident)
+    } else if (n.identity && masterIdents && masterIdents.size > 0) {
+      n.is_existing = masterIdents.has(n.identity)
+    } else if (masterNames && masterNames.size > 0) {
       n.is_existing = masterNames.has(n.name)
     }
     if (n.is_existing) {
@@ -3683,7 +3694,7 @@ const formatNodesListNames = (nodes) => {
     }
   })
 
-  if (masterNames && masterNames.size > 0) {
+  if ((masterIdents && masterIdents.size > 0) || (masterNames && masterNames.size > 0)) {
     existingCount.value = existCount
     newCount.value = nCount
   }
@@ -3883,8 +3894,10 @@ const handleFetchNodes = async () => {
       resolveMissingLocations(fetchedNodes.value).then(() => {
         formatNodesListNames(fetchedNodes.value)
       })
-      newCount.value = finalResult.new_count || 0
-      existingCount.value = finalResult.existing_count || 0
+      if (!existingCount.value && !newCount.value) {
+        newCount.value = finalResult.new_count || 0
+        existingCount.value = finalResult.existing_count || 0
+      }
       currentGroups.value = finalResult.available_groups || []
       loadSavedGroupSelection()
       hasFetched.value = true

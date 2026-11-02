@@ -139,6 +139,7 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
 
                 summary = YamlManager.get_profile_summary(req.profile_name)
                 existing_names = set(summary.get("proxy_names", []))
+                existing_identities = set(summary.get("proxy_identities", []))
                 available_groups = summary.get("groups", [])
                 active_test_url = (req.test_url.strip() if req.test_url and req.test_url.strip() else None) or summary.get("test_url") or DEFAULT_TEST_URL
 
@@ -192,7 +193,8 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
 
                 for idx, node in enumerate(raw_nodes):
                     name = str(node.get("name", f"Node-{idx+1}"))
-                    is_existing = name in existing_names
+                    node_ident = YamlManager.get_node_identity(node)
+                    is_existing = (node_ident in existing_identities) if node_ident else (name in existing_names)
                     if is_existing:
                         existing_count += 1
                     else:
@@ -240,6 +242,7 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                         "is_filtered": is_filtered,
                         "filter_reason": filter_reason,
                         "is_existing": is_existing,
+                        "identity": node_ident,
                         "sub_source": node_sub,
                         "raw": node
                     })
@@ -309,6 +312,7 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
 
     summary = YamlManager.get_profile_summary(req.profile_name)
     existing_names = set(summary.get("proxy_names", []))
+    existing_identities = set(summary.get("proxy_identities", []))
     available_groups = summary.get("groups", [])
     active_test_url = (req.test_url.strip() if req.test_url and req.test_url.strip() else None) or summary.get("test_url") or DEFAULT_TEST_URL
 
@@ -329,7 +333,8 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
 
     for idx, node in enumerate(raw_nodes):
         name = str(node.get("name", f"Node-{idx+1}"))
-        is_existing = name in existing_names
+        node_ident = YamlManager.get_node_identity(node)
+        is_existing = (node_ident in existing_identities) if node_ident else (name in existing_names)
         if is_existing:
             existing_count += 1
         else:
@@ -377,6 +382,7 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
             "is_filtered": is_filtered,
             "filter_reason": filter_reason,
             "is_existing": is_existing,
+            "identity": node_ident,
             "sub_source": node_sub,
             "raw": node
         })
