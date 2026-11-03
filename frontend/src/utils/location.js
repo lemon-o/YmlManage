@@ -470,6 +470,64 @@ export function hasFlagOrCodePrefix(name) {
 }
 
 /**
+ * 排除节点名称末尾附带的订阅用户信息（流量统计、到期时间、3x-ui / x-ui 客户端邮箱/哈希等）
+ * 例如:
+ * "US 美国 俄勒冈GC1-gp0o21t2ly|📊 195.00GB" -> "US 美国 俄勒冈GC1"
+ * "HK 中国 香港-BGP-YC|📊 100.00GB" -> "HK 中国 香港-BGP-YC"
+ * "日本 01-sddakiwz|📊 50GB|⏳ 15D" -> "日本 01"
+ * "香港 02@user@gmail.com|📊 200GB" -> "香港 02"
+ * "韩国 03-gp0o21t2ly" -> "韩国 03"
+ * "台湾 05 [剩余流量: 100G]" -> "台湾 05"
+ * @param {string} name 节点原始名称
+ * @returns {string} 排除订阅用户信息后的纯净节点名称
+ */
+export function stripSubscriptionUserInfo(name) {
+  if (!name) return ''
+  let cleaned = String(name).trim()
+
+  // 1. 先移除用各种括号包裹的流量/统计信息，如 [剩余流量: 100G], (📊 195.00GB), 【到期: 2026-12-31】
+  const bracketTraffic = /[\s]*[\[(（【][^\])）】]*(?:[📊⏳📉📈🏷️📅🗓️⏰⌛]|剩余|流量|到期|重置|过期|\d+(?:\.\d+)?\s*(?:[KMGTP]?B|[GMKT])\b)[^\])）】]*[\])）】]\s*$/i
+  cleaned = cleaned.replace(bracketTraffic, '').trim()
+
+  // 2. 移除以 | 或 ｜ 分隔的流量、到期时间、剩余时间等统计信息
+  // 例如: '|📊 195.00GB', '|📊195GB|⏳30D', '| 剩余流量: 195G', '| 2026-11-03'
+  const trafficPattern = /[\s]*[|｜][\s]*(?:[📊⏳📉📈🏷️📅🗓️⏰⌛]|剩余|流量|到期|重置|过期|\d+(?:\.\d+)?\s*(?:[KMGTP]?B|[GMKT])\b).*$/i
+  cleaned = cleaned.replace(trafficPattern, '').trim()
+
+  // 也处理不带竖线但以空格/短横线结尾的明确流量单位: 如 ' - 195.00GB', ' 📊 195GB'
+  const dashTraffic = /[\s]+(?:[📊⏳]|(?:[-—]\s*)?\d+(?:\.\d+)?\s*(?:[KMGTP]?B)\b).*$/i
+  cleaned = cleaned.replace(dashTraffic, '').trim()
+
+  // 3. 移除末尾附带的订阅用户账号 / 客户端 Email / 随机哈希标识
+  // 明确的邮箱后缀: -user@domain.com, @user@domain.com
+  const emailPattern = /[-_@\s]+[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/
+  cleaned = cleaned.replace(emailPattern, '').trim()
+
+  // @用户标识: @gp0o21t2ly, @username
+  const atUserPattern = /@+[a-zA-Z0-9_.-]+$/
+  cleaned = cleaned.replace(atUserPattern, '').trim()
+
+  // 3x-ui 随机生成的 8-16 位字母+数字客户端哈希 (如 -gp0o21t2ly, -sddakiwz)
+  const isUserHashSuffix = (s) => {
+    const m = s.match(/[-_]([a-z0-9]{6,24})$/i)
+    if (!m) return false
+    const tail = m[1]
+    if (/^\d+$/.test(tail)) return false
+    const hasAlpha = /[a-zA-Z]/.test(tail)
+    const hasDigit = /\d/.test(tail)
+    if (tail.length >= 8) return true
+    if (tail.length >= 6 && hasAlpha && hasDigit) return true
+    return false
+  }
+
+  if (isUserHashSuffix(cleaned)) {
+    cleaned = cleaned.replace(/[-_][a-z0-9]{6,24}$/i, '').trim()
+  }
+
+  return cleaned
+}
+
+/**
  * 当节点名称前面没有国旗代码时，自动补全国旗代码+空格；
  * 若已带有 2 位国家大写代码前缀，把大写代码汉化，前面再加上国家代码
  * @param {string} name 节点名称
@@ -478,8 +536,11 @@ export function hasFlagOrCodePrefix(name) {
  * @returns {string} 补全/规范化后的节点名称
  */
 export function formatNodeNameWithFlag(name, node = {}, ipCache = {}) {
-  const origName = String(name || node?.name || '').trim()
+  let origName = String(name || node?.name || '').trim()
   if (!origName) return origName
+
+  // 首先排除末尾附带的订阅用户信息（流量统计、到期时间、3x-ui用户哈希等）
+  origName = stripSubscriptionUserInfo(origName)
 
   // 1. 如果已经包含国旗 Emoji，但紧跟文字没有空格 (如 "🇭🇰香港01")，规范化补上空格
   const emojiMatch = origName.match(/^([\u{1F1E6}-\u{1F1FF}]{2})(\S.*)$/u)

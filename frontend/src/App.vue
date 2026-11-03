@@ -115,6 +115,17 @@
   <div v-else class="xui-app-container">
     <!-- 顶部导航栏 (已删除左上角 3X 徽标，呼吸感拉开) -->
     <header class="xui-top-header">
+      <!-- 局域网访问地址胶囊 (在最顶部，支持一键点击复制) -->
+      <div
+        v-if="systemInfo.lan_ip && systemInfo.lan_ip !== '127.0.0.1'"
+        class="lan-pill-btn"
+        @click="copyLanUrl"
+        :title="'点击复制局域网访问地址: ' + systemInfo.lan_url"
+      >
+        <span class="lan-live-dot"></span>
+        <span class="lan-text">局域网: {{ systemInfo.lan_ip }}:{{ systemInfo.port }}</span>
+      </div>
+
       <div class="header-brand-section">
         <div class="status-pill-3x">
           <span class="status-live-dot"></span>
@@ -148,15 +159,6 @@
 
       <!-- 右侧操作栏 (母本管理与常用源) -->
       <div class="header-action-section">
-        <div
-          v-if="systemInfo.lan_ip && systemInfo.lan_ip !== '127.0.0.1'"
-          class="lan-pill-btn"
-          @click="copyLanUrl"
-          :title="'点击复制局域网访问地址: ' + systemInfo.lan_url"
-        >
-          <span class="lan-live-dot"></span>
-          <span class="lan-text">局域网: {{ systemInfo.lan_ip }}:{{ systemInfo.port }}</span>
-        </div>
         <div class="header-nav-btns-row">
           <button class="xui-nav-btn" @click="openRemoteUploadDialog(currentProfile)" title="将当前编辑好的母本上传至指定设备 (SMB/FTP/WebDAV)">
             <el-icon><Upload /></el-icon>
@@ -175,10 +177,6 @@
               <el-icon><Key /></el-icon>
               <span>修改密码</span>
             </button>
-            <button class="xui-nav-btn danger-hover" @click="handleLogout" title="退出当前登录">
-              <el-icon><SwitchButton /></el-icon>
-              <span>退出</span>
-            </button>
           </template>
         </div>
       </div>
@@ -193,14 +191,14 @@
             <span class="panel-head-title">提取外部订阅节点并进行 URL Test 延迟测试</span>
           </div>
 
-          <div class="panel-head-right" style="display: flex; align-items: center; gap: 16px;">
-            <div class="test-url-selector-wrap" style="display: flex; align-items: center;">
+          <div class="panel-head-right">
+            <div class="test-url-selector-wrap">
               <span class="quick-src-label">URL Test 接口:</span>
               <el-select
                 v-model="activeTestUrl"
                 placeholder="选取 URL Test 接口"
                 size="small"
-                style="width: 220px"
+                class="header-test-select"
                 @change="handleTestUrlChange"
               >
                 <el-option
@@ -217,13 +215,13 @@
               </el-select>
             </div>
 
-            <div class="quick-source-wrap" style="display: flex; align-items: center;" v-if="savedSources.length > 0">
+            <div class="quick-source-wrap" v-if="savedSources.length > 0">
               <span class="quick-src-label">载入常用源:</span>
               <el-select
                 v-model="selectedSourceId"
                 placeholder="快速载入常用源"
                 size="small"
-                style="width: 170px"
+                class="header-source-select"
                 @change="applyQuickSource"
                 clearable
               >
@@ -240,26 +238,27 @@
 
         <div class="panel-inner-body">
           <div class="fetch-action-bar">
-            <div class="fetch-input-field">
-              <el-input
-                v-model="fetchUrl"
-                placeholder="请输入外部订阅链接 (支持 Clash YAML、Base64 或单节点链接)"
-                clearable
-                @keyup.enter="handleFetchNodes"
-              >
-                <template #prefix>
-                  <el-icon color="#8b949e"><Link /></el-icon>
-                </template>
-              </el-input>
+            <div class="fetch-input-group">
+              <div class="fetch-input-field">
+                <el-input
+                  v-model="fetchUrl"
+                  placeholder="请输入外部订阅链接 (支持 Clash YAML、Base64 或单节点链接)"
+                  clearable
+                  @keyup.enter="handleFetchNodes"
+                >
+                  <template #prefix>
+                    <el-icon color="#8b949e"><Link /></el-icon>
+                  </template>
+                </el-input>
+              </div>
+
+              <button class="fetch-paste-btn" @click="pasteFromClipboard" title="从剪贴板粘贴">
+                <el-icon><DocumentCopy /></el-icon>
+              </button>
             </div>
 
-            <button class="xui-std-btn" @click="pasteFromClipboard" title="从剪贴板读取">
-              <el-icon><DocumentCopy /></el-icon>
-              <span>粘贴</span>
-            </button>
-
             <button
-              class="xui-primary-btn"
+              class="xui-primary-btn fetch-submit-btn"
               :disabled="fetching"
               @click="handleFetchNodes"
             >
@@ -268,17 +267,13 @@
             </button>
           </div>
 
-          <div class="panel-note-line" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div class="panel-note-line" v-if="isDomesticTestUrl" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
             <div style="display: flex; align-items: center; gap: 6px;">
-              <span class="note-dot" :style="{ background: isDomesticTestUrl ? '#f59e0b' : '#38bdf8' }"></span>
-              <span v-if="isDomesticTestUrl" style="color: #f59e0b; font-weight: 500;">
+              <span class="note-dot" style="background: #f59e0b;"></span>
+              <span style="color: #f59e0b; font-weight: 500;">
                 提示：当前选取了国内直连接口，海外节点访问属于【出海再回国】线路，延迟通常偏高(400~1000ms+)。建议切换为 Cloudflare 204 或 Google 204 测出海外节点真实物理延迟。
               </span>
-              <span v-else>
-                内置 Mihomo 官方内核（已开启 Unified Delay 真实延迟算法）与 DoH 直连公网探测真实 RTT 握手延时，消除 TLS 握手干扰，精准识别死节点。
-              </span>
             </div>
-
           </div>
         </div>
       </section>
@@ -1042,9 +1037,22 @@
                 <el-icon v-else class="is-loading"><Loading /></el-icon>
                 <span>{{ testingProfileDelays ? '真延迟测定中...' : '真延迟测试 (Unified)' }}</span>
               </button>
-              <button class="xui-primary-btn btn-sm" @click="openAddNodeModal">
+              <!-- 未选中节点时显示【添加节点】，单选/全选后改为【编辑】按钮 -->
+              <button
+                v-if="selectedEditorNodeNames.length === 0"
+                class="xui-primary-btn btn-sm"
+                @click="openAddNodeModal"
+              >
                 <el-icon><Plus /></el-icon>
                 <span>添加节点</span>
+              </button>
+              <button
+                v-else
+                class="xui-primary-btn btn-sm active-edit-btn"
+                @click="openEditSelectedNodesModal"
+              >
+                <el-icon><Edit /></el-icon>
+                <span>编辑 ({{ selectedEditorNodeNames.length }})</span>
               </button>
 
               <!-- 未选中任何节点时：显示【清空所有节点】或【清空当前页签节点】 -->
@@ -1469,6 +1477,143 @@
       </template>
     </el-dialog>
 
+    <!-- 选中节点批量/单选编辑弹窗（编辑所属订阅源 / 要添加的策略组） -->
+    <el-dialog
+      v-model="editSelectedNodesModalVisible"
+      :title="selectedEditorNodeNames.length === 1 ? `编辑节点: ${selectedEditorNodeNames[0]}` : `批量编辑节点 (已选 ${selectedEditorNodeNames.length} 个)`"
+      width="620px"
+      class="xui-custom-dialog batch-edit-dialog"
+    >
+      <div class="batch-edit-modal-inner">
+        <!-- 顶部信息栏 -->
+        <div class="be-node-preview">
+          <div class="be-preview-header">
+            <span class="be-preview-title">
+              {{ selectedEditorNodeNames.length === 1 ? '当前选中的节点' : `已选中的 ${selectedEditorNodeNames.length} 个节点` }}
+            </span>
+            <span class="be-preview-count">共 {{ selectedEditorNodeNames.length }} 个节点</span>
+          </div>
+          <div class="be-tags-scroll">
+            <span v-for="name in selectedEditorNodeNames.slice(0, 10)" :key="name" class="be-node-tag">
+              {{ name }}
+            </span>
+            <span v-if="selectedEditorNodeNames.length > 10" class="be-more-tag">
+              + 还有 {{ selectedEditorNodeNames.length - 10 }} 个节点...
+            </span>
+          </div>
+        </div>
+
+        <!-- 1. 所属订阅源设置 -->
+        <div class="be-section">
+          <div class="be-section-label">
+            <span class="be-label-text">所属订阅源</span>
+            <span v-if="selectedEditorNodeNames.length > 1 && !editNodesForm.sub_source" class="be-label-tip">
+              (留空或不修改则保持各节点原有订阅源不变)
+            </span>
+          </div>
+          <el-select
+            v-model="editNodesForm.sub_source"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            placeholder="请选择现有订阅源或直接输入新源名称..."
+            style="width: 100%;"
+          >
+            <el-option
+              v-for="src in allExistingSourceNames"
+              :key="src"
+              :label="src"
+              :value="src"
+            />
+          </el-select>
+        </div>
+
+        <!-- 2. 要添加的策略组设置 -->
+        <div class="be-section">
+          <div class="be-section-label-row">
+            <span class="be-label-text">要添加的策略组</span>
+            <!-- 多选时提供模式选择 -->
+            <div v-if="selectedEditorNodeNames.length > 1" class="be-mode-selector">
+              <el-radio-group v-model="editNodesForm.group_mode" size="small">
+                <el-radio-button value="add">增量加入</el-radio-button>
+                <el-radio-button value="set">覆盖重设</el-radio-button>
+                <el-radio-button value="remove">批量移出</el-radio-button>
+              </el-radio-group>
+            </div>
+          </div>
+
+          <div v-if="selectedEditorNodeNames.length > 1" class="be-mode-tip">
+            <span v-if="editNodesForm.group_mode === 'add'">
+              💡 <strong>增量加入</strong>：将选中的 {{ selectedEditorNodeNames.length }} 个节点加入勾选的策略组，保留各节点原有的其他策略组
+            </span>
+            <span v-else-if="editNodesForm.group_mode === 'set'">
+              ⚠️ <strong>覆盖重设</strong>：将选中节点的所属策略组统一重设为勾选的策略组（未勾选的策略组将被移出）
+            </span>
+            <span v-else-if="editNodesForm.group_mode === 'remove'">
+              ⛔ <strong>批量移出</strong>：将选中的节点从下方勾选的策略组中移出
+            </span>
+          </div>
+
+          <!-- 搜索与快捷全选/清空/反选 -->
+          <div class="ng-action-bar" style="margin-top: 10px;">
+            <el-input
+              v-model="editNodesForm.search_query"
+              placeholder="搜索策略组名称或类型..."
+              clearable
+              size="small"
+              style="flex: 1;"
+            >
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
+            <div class="ng-quick-btns">
+              <button type="button" class="ng-btn-text" @click="selectAllGroupsForBatchEdit">全选</button>
+              <button type="button" class="ng-btn-text" @click="clearAllGroupsForBatchEdit">清空</button>
+              <button type="button" class="ng-btn-text" @click="invertGroupsForBatchEdit">反选</button>
+            </div>
+          </div>
+
+          <!-- 策略组列表滚动框 -->
+          <div class="ng-list-scroll" style="max-height: 240px;">
+            <div
+              v-for="grp in filteredGroupsForBatchEditModal"
+              :key="grp.name"
+              class="ng-group-row"
+              @click="toggleGroupForBatchEdit(grp.name)"
+            >
+              <el-checkbox
+                :model-value="editNodesForm.target_groups.includes(grp.name)"
+                @click.stop
+                @change="toggleGroupForBatchEdit(grp.name)"
+              />
+              <div class="ng-row-main">
+                <span class="ng-row-name">{{ grp.name }}</span>
+                <span class="ng-row-type">{{ grp.type }}</span>
+              </div>
+              <div class="ng-row-meta">
+                共 {{ (grp.proxies || []).length }} 个节点
+              </div>
+            </div>
+
+            <div v-if="filteredGroupsForBatchEditModal.length === 0" class="ng-empty-tip">
+              未找到匹配的策略组
+            </div>
+          </div>
+
+          <div class="ng-footer-summary">
+            当前已勾选 <strong>{{ editNodesForm.target_groups.length }}</strong> / {{ editorGroups.length }} 个策略组
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <button class="xui-std-btn" @click="editSelectedNodesModalVisible = false">取消</button>
+        <button class="xui-primary-btn" style="margin-left: 8px;" @click="confirmSaveBatchEditNodes">
+          保存修改
+        </button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑策略组参数弹窗 -->
     <el-dialog
       v-model="editGroupModalVisible"
@@ -1838,7 +1983,7 @@
         <div class="remote-top-bar">
           <div class="remote-target-select-row">
             <span class="r-label">要上传的母本:</span>
-            <el-select v-model="targetProfileForUpload" size="small" style="width: 210px;">
+            <el-select v-model="targetProfileForUpload" size="small" class="target-profile-select">
               <el-option
                 v-for="p in profileList"
                 :key="p.name"
@@ -1915,7 +2060,7 @@
         <el-form label-position="top" class="remote-upload-form">
           <!-- WebDAV -->
           <template v-if="remoteForm.protocol === 'webdav'">
-            <el-form-item label="WebDAV 完整 URL (填文件夹路径或具体文件名均可)">
+            <el-form-item label="WebDAV 完整 URL">
               <el-input
                 v-model="remoteForm.url"
                 placeholder="例如: http://192.168.1.1:5005/dav 或 http://.../dav/clash.yaml"
@@ -2026,28 +2171,27 @@
       </div>
 
       <template #footer>
-        <div class="remote-footer-flex">
-          <button
-            class="xui-std-btn"
-            :disabled="testingRemote || uploadingRemote"
-            @click="handleTestRemoteConnection"
-          >
-            <el-icon v-if="testingRemote" class="is-loading"><Loading /></el-icon>
-            <span>{{ testingRemote ? '测试中...' : '测试连接' }}</span>
-          </button>
-
-          <div style="display: flex; gap: 8px;">
-            <button class="xui-std-btn" @click="remoteModalVisible = false">取消</button>
+        <div class="remote-footer-vertical">
+          <div class="remote-footer-row1">
             <button
-              class="xui-primary-btn"
-              :disabled="uploadingRemote"
-              @click="handleUploadToRemote"
+              class="xui-std-btn remote-test-conn-btn"
+              :disabled="testingRemote || uploadingRemote"
+              @click="handleTestRemoteConnection"
             >
-              <el-icon v-if="uploadingRemote" class="is-loading"><Loading /></el-icon>
-              <el-icon v-else><Upload /></el-icon>
-              <span>{{ uploadingRemote ? '上传传输中...' : '确认上传并覆盖替换' }}</span>
+              <el-icon v-if="testingRemote" class="is-loading"><Loading /></el-icon>
+              <span>{{ testingRemote ? '测试中...' : '测试连接' }}</span>
             </button>
+            <button class="xui-std-btn remote-cancel-btn" @click="remoteModalVisible = false">取消</button>
           </div>
+          <button
+            class="xui-primary-btn remote-confirm-upload-btn"
+            :disabled="uploadingRemote"
+            @click="handleUploadToRemote"
+          >
+            <el-icon v-if="uploadingRemote" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else><Upload /></el-icon>
+            <span>{{ uploadingRemote ? '上传传输中...' : '确认上传并覆盖替换' }}</span>
+          </button>
         </div>
       </template>
     </el-dialog>
@@ -2092,11 +2236,11 @@ import {
   Folder, Collection, Download, Search,
   Upload, Check, Plus, UploadFilled,
   DocumentCopy, Connection, Files, CircleCheck, CircleClose, Loading, Link,
-  Close, Delete, Edit, Lock, Key, SwitchButton, Odometer, Location,
+  Close, Delete, Edit, Lock, Key, Odometer, Location,
   FullScreen, Aim
 } from '@element-plus/icons-vue'
 import * as api from './api'
-import { getNodeLocation, formatNodeNameWithFlag, getNodeIdentityKey } from './utils/location'
+import { getNodeLocation, formatNodeNameWithFlag, getNodeIdentityKey, stripSubscriptionUserInfo } from './utils/location'
 import YamlCodeEditor from './components/YamlCodeEditor.vue'
 
 // 访问认证与安全模式状态 (针对 Docker 容器网页密码保护)
@@ -2199,17 +2343,6 @@ const handleLogin = async () => {
   } finally {
     submittingAuth.value = false
   }
-}
-
-const handleLogout = async () => {
-  try {
-    await api.logoutAuth()
-  } catch (e) {}
-  localStorage.removeItem('ymlmanage_token')
-  authStatus.value.logged_in = false
-  loginPassword.value = ''
-  authErrorMessage.value = ''
-  ElMessage.info('已安全退出登录')
 }
 
 const openChangePasswordDialog = () => {
@@ -2835,6 +2968,170 @@ const handleDeleteSelectedProxies = () => {
 
   selectedEditorNodeNames.value = []
   ElMessage.success(`已删除 ${count} 个选中节点`)
+}
+
+// 选中节点批量/单选编辑弹窗状态
+const editSelectedNodesModalVisible = ref(false)
+const editNodesForm = ref({
+  sub_source: '',
+  group_mode: 'add', // 'add' 增量加入 | 'set' 覆盖设定 | 'remove' 批量移出
+  target_groups: [],
+  search_query: ''
+})
+
+// 汇总母本中已存在的所有订阅源名称（常用源 + 各节点实际归属）
+const allExistingSourceNames = computed(() => {
+  const set = new Set(['自建节点'])
+  if (savedSources.value && Array.isArray(savedSources.value)) {
+    savedSources.value.forEach(s => {
+      if (s && s.name && s.name.trim()) set.add(s.name.trim())
+    })
+  }
+  if (editorProxies.value && Array.isArray(editorProxies.value)) {
+    editorProxies.value.forEach(p => {
+      const src = getNodeSubSource(p)
+      if (src && src.trim() && src !== '自建节点' && src !== '外部订阅' && src !== '母本内置') {
+        set.add(src.trim())
+      }
+    })
+  }
+  return Array.from(set)
+})
+
+const filteredGroupsForBatchEditModal = computed(() => {
+  const q = editNodesForm.value.search_query.trim().toLowerCase()
+  if (!q) return editorGroups.value
+  return editorGroups.value.filter(g =>
+    (g.name || '').toLowerCase().includes(q) ||
+    (g.type || '').toLowerCase().includes(q)
+  )
+})
+
+const openEditSelectedNodesModal = () => {
+  if (selectedEditorNodeNames.value.length === 0) return
+
+  editNodesForm.value.search_query = ''
+
+  if (selectedEditorNodeNames.value.length === 1) {
+    // 单选节点
+    const nodeName = selectedEditorNodeNames.value[0]
+    const node = editorProxies.value.find(p => p.name === nodeName)
+    editNodesForm.value.sub_source = node ? getNodeSubSource(node) : ''
+    editNodesForm.value.group_mode = 'set' // 单选默认为覆盖设定 (即直接维护所属策略组)
+    editNodesForm.value.target_groups = editorGroups.value
+      .filter(g => (g.proxies || []).includes(nodeName))
+      .map(g => g.name)
+  } else {
+    // 多选 / 全选节点
+    const selectedNodes = editorProxies.value.filter(p => selectedEditorNodeNames.value.includes(p.name))
+    const sources = new Set(selectedNodes.map(p => getNodeSubSource(p)))
+    // 若所有选中节点同属于一个订阅源，则默认回显该订阅源；否则留空
+    editNodesForm.value.sub_source = sources.size === 1 ? Array.from(sources)[0] : ''
+    editNodesForm.value.group_mode = 'add' // 多选推荐默认为增量加入策略组
+    editNodesForm.value.target_groups = []
+  }
+
+  editSelectedNodesModalVisible.value = true
+}
+
+const toggleGroupForBatchEdit = (grpName) => {
+  const idx = editNodesForm.value.target_groups.indexOf(grpName)
+  if (idx !== -1) {
+    editNodesForm.value.target_groups.splice(idx, 1)
+  } else {
+    editNodesForm.value.target_groups.push(grpName)
+  }
+}
+
+const selectAllGroupsForBatchEdit = () => {
+  const currentSet = new Set(editNodesForm.value.target_groups)
+  filteredGroupsForBatchEditModal.value.forEach(g => currentSet.add(g.name))
+  editNodesForm.value.target_groups = Array.from(currentSet)
+}
+
+const clearAllGroupsForBatchEdit = () => {
+  editNodesForm.value.target_groups = []
+}
+
+const invertGroupsForBatchEdit = () => {
+  const currentSet = new Set(editNodesForm.value.target_groups)
+  filteredGroupsForBatchEditModal.value.forEach(g => {
+    if (currentSet.has(g.name)) {
+      currentSet.delete(g.name)
+    } else {
+      currentSet.add(g.name)
+    }
+  })
+  editNodesForm.value.target_groups = Array.from(currentSet)
+}
+
+const confirmSaveBatchEditNodes = () => {
+  const nodeNames = selectedEditorNodeNames.value
+  if (!nodeNames || nodeNames.length === 0) return
+
+  const newSubSource = (editNodesForm.value.sub_source || '').trim()
+  const targetGroups = editNodesForm.value.target_groups || []
+  const mode = editNodesForm.value.group_mode
+  const isSingle = nodeNames.length === 1
+
+  // 1. 更新选中节点的订阅源 (若未填写或多选时留空，则不改变原订阅源)
+  if (newSubSource) {
+    editorProxies.value.forEach(p => {
+      if (nodeNames.includes(p.name)) {
+        p.sub_source = newSubSource
+      }
+    })
+  }
+
+  // 2. 更新策略组归属
+  if (isSingle || mode === 'set') {
+    // 覆盖设定：勾选的策略组包含该节点，未勾选的策略组移除该节点
+    const targetSet = new Set(targetGroups)
+    const nodeSet = new Set(nodeNames)
+    editorGroups.value.forEach(g => {
+      if (!g.proxies) g.proxies = []
+      if (targetSet.has(g.name)) {
+        nodeNames.forEach(n => {
+          if (!g.proxies.includes(n)) g.proxies.push(n)
+        })
+      } else {
+        g.proxies = g.proxies.filter(n => !nodeSet.has(n))
+      }
+    })
+  } else if (mode === 'add') {
+    // 增量加入：将选中节点加入勾选的策略组
+    if (targetGroups.length > 0) {
+      const targetSet = new Set(targetGroups)
+      editorGroups.value.forEach(g => {
+        if (targetSet.has(g.name)) {
+          if (!g.proxies) g.proxies = []
+          nodeNames.forEach(n => {
+            if (!g.proxies.includes(n)) g.proxies.push(n)
+          })
+        }
+      })
+    }
+  } else if (mode === 'remove') {
+    // 批量移出：从勾选的策略组中移出选中节点
+    if (targetGroups.length > 0) {
+      const targetSet = new Set(targetGroups)
+      const nodeSet = new Set(nodeNames)
+      editorGroups.value.forEach(g => {
+        if (targetSet.has(g.name)) {
+          if (g.proxies) {
+            g.proxies = g.proxies.filter(n => !nodeSet.has(n))
+          }
+        }
+      })
+    }
+  }
+
+  editSelectedNodesModalVisible.value = false
+  if (isSingle) {
+    ElMessage.success(`已成功更新节点「${nodeNames[0]}」的订阅源与策略组配置`)
+  } else {
+    ElMessage.success(`已成功批量更新 ${nodeNames.length} 个节点的订阅源与策略组配置`)
+  }
 }
 
 const filteredEditorGroups = computed(() => {
@@ -4042,8 +4339,9 @@ const confirmImport = async () => {
       raw.sub_source = '外部订阅'
     }
 
-    // 当节点名称前面没有国旗代码时，自动补全国旗代码+空格
-    const formattedName = formatNodeNameWithFlag(raw.name, raw, ipLocationMap.value)
+    // 排除节点末尾附带的订阅用户信息（流量、到期、3x-ui用户哈希等）并补全国旗代码
+    const cleanName = stripSubscriptionUserInfo(raw.name || n.name || '')
+    const formattedName = formatNodeNameWithFlag(cleanName, raw, ipLocationMap.value)
     raw.name = formattedName
     n.name = formattedName
     if (n.raw) {
@@ -4827,6 +5125,7 @@ const handleDeleteSource = async (id) => {
   display: flex;
   align-items: center;
   gap: 20px;
+  order: 1;
 }
 
 .status-pill-3x {
@@ -4883,6 +5182,7 @@ const handleDeleteSource = async (id) => {
   display: flex;
   align-items: center;
   gap: 12px;
+  order: 3;
 }
 
 .header-nav-btns-row {
@@ -5185,6 +5485,26 @@ const handleDeleteSource = async (id) => {
   margin-right: 6px;
 }
 
+.panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.test-url-selector-wrap,
+.quick-source-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.header-test-select {
+  width: 220px;
+}
+
+.header-source-select {
+  width: 170px;
+}
+
 .panel-inner-body {
   padding: 20px 22px;
 }
@@ -5194,8 +5514,41 @@ const handleDeleteSource = async (id) => {
   gap: 12px;
 }
 
+.fetch-input-group {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+}
+
 .fetch-input-field {
   flex: 1;
+}
+
+.fetch-paste-btn {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #8b949e !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 38px;
+  padding: 0;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none !important;
+}
+
+.fetch-paste-btn:hover {
+  color: #58a6ff !important;
+  background: rgba(88, 166, 255, 0.1) !important;
+}
+
+.fetch-paste-btn .el-icon {
+  font-size: 19px !important;
+  margin: 0 !important;
 }
 
 .panel-note-line {
@@ -5843,8 +6196,19 @@ const handleDeleteSource = async (id) => {
 
 .smi-actions {
   display: flex;
-  justify-content: flex-end;
-  padding-top: 4px;
+  align-items: center;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.smi-actions > * {
+  flex: 1;
+}
+
+.smi-actions .pmi-btn {
+  width: 100%;
+  flex: 1;
+  height: 32px;
 }
 
 
@@ -6117,6 +6481,9 @@ const handleDeleteSource = async (id) => {
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
+  order: 2;
+  margin-left: auto;
+  margin-right: 12px;
 }
 
 .lan-pill-btn:hover {
@@ -6161,6 +6528,20 @@ const handleDeleteSource = async (id) => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.remote-target-select-row .r-label,
+.remote-preset-select-row .r-label {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+.target-profile-select {
+  width: 140px !important;
+}
+
+.remote-preset-select {
+  width: 140px !important;
 }
 
 .r-label {
@@ -6299,7 +6680,16 @@ const handleDeleteSource = async (id) => {
     gap: 10px !important;
   }
 
+  .lan-pill-btn {
+    order: -1 !important;
+    width: 100% !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+  }
+
   .header-brand-section {
+    order: 1 !important;
     flex-direction: column !important;
     align-items: stretch !important;
     gap: 8px !important;
@@ -6332,16 +6722,11 @@ const handleDeleteSource = async (id) => {
   }
 
   .header-action-section {
+    order: 2 !important;
     width: 100% !important;
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
-  }
-
-  .header-action-section .lan-pill-btn {
-    width: 100% !important;
-    justify-content: center !important;
-    box-sizing: border-box !important;
   }
 
   /* 顶部操作按钮保持单行水平排布 */
@@ -6407,15 +6792,31 @@ const handleDeleteSource = async (id) => {
     gap: 8px !important;
   }
 
-  .test-url-selector-wrap {
+  .test-url-selector-wrap,
+  .quick-source-wrap {
     width: 100% !important;
     display: flex !important;
     align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
   }
 
-  .test-url-selector-wrap .el-select {
+  .test-url-selector-wrap .quick-src-label,
+  .quick-source-wrap .quick-src-label {
+    min-width: 90px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    font-size: 13px !important;
+    color: #8b949e !important;
+  }
+
+  .test-url-selector-wrap .el-select,
+  .quick-source-wrap .el-select,
+  .header-test-select,
+  .header-source-select {
     flex: 1 !important;
     width: auto !important;
+    max-width: 100% !important;
   }
 
   .panel-head-right .xui-primary-btn {
@@ -6432,12 +6833,54 @@ const handleDeleteSource = async (id) => {
     gap: 8px !important;
   }
 
+  .fetch-input-group {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
   .fetch-input-field {
+    flex: 1 !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+
+  .fetch-input-field .el-input {
     width: 100% !important;
   }
 
-  .fetch-action-bar .xui-std-btn,
-  .fetch-action-bar .xui-primary-btn {
+  .fetch-input-field .el-input__wrapper {
+    height: 38px !important;
+  }
+
+  .fetch-paste-btn {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #8b949e !important;
+  }
+
+  .fetch-paste-btn .el-icon {
+    font-size: 20px !important;
+    margin: 0 !important;
+  }
+
+  .fetch-paste-btn:hover,
+  .fetch-paste-btn:active {
+    color: #58a6ff !important;
+    background: rgba(88, 166, 255, 0.12) !important;
+  }
+
+  .fetch-submit-btn {
     width: 100% !important;
     justify-content: center !important;
     height: 38px !important;
@@ -6513,6 +6956,10 @@ const handleDeleteSource = async (id) => {
   .xui-node-card {
     padding: 12px 12px !important;
   }
+
+  .target-profile-select {
+    width: 130px !important;
+  }
 }
 
 @media (max-width: 480px) {
@@ -6527,11 +6974,34 @@ const handleDeleteSource = async (id) => {
   }
 }
 
-.remote-footer-flex {
+.remote-footer-vertical {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
+}
+
+.remote-footer-row1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.remote-test-conn-btn,
+.remote-cancel-btn {
+  flex: 1;
+  height: 38px;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.remote-confirm-upload-btn {
+  width: 100%;
+  height: 40px;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 /* 策略组关联域名规则样式 */
@@ -6951,6 +7421,130 @@ const handleDeleteSource = async (id) => {
 
 .ng-footer-summary strong {
   color: #38bdf8;
+}
+
+/* 批量/单选节点编辑弹窗 */
+.active-edit-btn {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.35) !important;
+  font-weight: 500 !important;
+}
+
+.active-edit-btn:hover {
+  background: #1d4ed8 !important;
+  border-color: #60a5fa !important;
+}
+
+.batch-edit-dialog .el-dialog__body {
+  padding: 16px 22px !important;
+}
+
+.be-node-preview {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #242936;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.be-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.be-preview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.be-preview-count {
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.be-tags-scroll {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.be-node-tag {
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.be-more-tag {
+  font-size: 11px;
+  color: #94a3b8;
+  padding: 2px 4px;
+  font-style: italic;
+}
+
+.be-section {
+  margin-bottom: 18px;
+}
+
+.be-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.be-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.be-label-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.be-label-tip {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.be-mode-selector {
+  display: flex;
+  align-items: center;
+}
+
+.be-mode-tip {
+  font-size: 12px;
+  color: #94a3b8;
+  background: rgba(33, 89, 211, 0.08);
+  border: 1px dashed rgba(96, 165, 250, 0.25);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.be-mode-tip strong {
+  color: #60a5fa;
 }
 
 </style>

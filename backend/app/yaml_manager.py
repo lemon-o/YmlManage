@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -91,6 +92,70 @@ class YamlManager:
         if cred:
             return f"{ptype}://{server}:{port}@{cred}"
         return f"{ptype}://{server}:{port}"
+
+    @staticmethod
+    def strip_subscription_user_info(name: str) -> str:
+        """
+        排除节点名称末尾附带的订阅用户信息（流量统计、到期时间、3x-ui / x-ui 客户端邮箱/哈希等）
+        例如:
+        "US 美国 俄勒冈GC1-gp0o21t2ly|📊 195.00GB" -> "US 美国 俄勒冈GC1"
+        "HK 中国 香港-BGP-YC|📊 100.00GB" -> "HK 中国 香港-BGP-YC"
+        """
+        if not name:
+            return ""
+        cleaned = str(name).strip()
+
+        # 1. 先移除用各种括号包裹的流量/统计信息，如 [剩余流量: 100G], (📊 195.00GB), 【到期: 2026-12-31】
+        bracket_traffic = re.compile(
+            r'[\s]*[\[(（【][^\])）】]*(?:[📊⏳📉📈🏷️📅🗓️⏰⌛]|剩余|流量|到期|重置|过期|\d+(?:\.\d+)?\s*(?:[KMGTP]?B|[GMKT])\b)[^\])）】]*[\])）】]\s*$',
+            re.IGNORECASE
+        )
+        cleaned = bracket_traffic.sub('', cleaned).strip()
+
+        # 2. 移除以 | 或 ｜ 分隔的流量、到期时间、剩余时间等统计信息
+        # 例如: '|📊 195.00GB', '|📊195GB|⏳30D', '| 剩余流量: 195G', '| 2026-11-03'
+        traffic_pattern = re.compile(
+            r'[\s]*[|｜][\s]*(?:[📊⏳📉📈🏷️📅🗓️⏰⌛]|剩余|流量|到期|重置|过期|\d+(?:\.\d+)?\s*(?:[KMGTP]?B|[GMKT])\b).*$',
+            re.IGNORECASE
+        )
+        cleaned = traffic_pattern.sub('', cleaned).strip()
+
+        # 也处理不带竖线但以空格/短横线结尾的明确流量单位: 如 ' - 195.00GB', ' 📊 195GB'
+        dash_traffic = re.compile(
+            r'[\s]+(?:[📊⏳]|(?:[-—]\s*)?\d+(?:\.\d+)?\s*(?:[KMGTP]?B)\b).*$',
+            re.IGNORECASE
+        )
+        cleaned = dash_traffic.sub('', cleaned).strip()
+
+        # 3. 移除末尾附带的订阅用户账号 / 客户端 Email / 随机哈希标识
+        # 明确的邮箱后缀: -user@domain.com, @user@domain.com
+        email_pattern = re.compile(r'[-_@\s]+[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+        cleaned = email_pattern.sub('', cleaned).strip()
+
+        # @用户标识: @gp0o21t2ly, @username
+        at_user_pattern = re.compile(r'@+[a-zA-Z0-9_.-]+$')
+        cleaned = at_user_pattern.sub('', cleaned).strip()
+
+        # 3x-ui 随机生成的 8-16 位字母+数字客户端哈希 (如 -gp0o21t2ly, -sddakiwz)
+        def is_user_hash_suffix(s: str) -> bool:
+            m = re.search(r'[-_]([a-z0-9]{6,24})$', s, re.IGNORECASE)
+            if not m:
+                return False
+            tail = m.group(1)
+            if tail.isdigit():
+                return False
+            has_alpha = any(c.isalpha() for c in tail)
+            has_digit = any(c.isdigit() for c in tail)
+            if len(tail) >= 8:
+                return True
+            if len(tail) >= 6 and has_alpha and has_digit:
+                return True
+            return False
+
+        if is_user_hash_suffix(cleaned):
+            cleaned = re.sub(r'[-_][a-z0-9]{6,24}$', '', cleaned, flags=re.IGNORECASE).strip()
+
+        return cleaned
 
     @classmethod
     def get_profile_summary(cls, profile_name: str) -> Dict[str, Any]:
@@ -402,7 +467,8 @@ class YamlManager:
             if not isinstance(node, dict) or "name" not in node:
                 continue
 
-            node_name = str(node["name"])
+            node_name = cls.strip_subscription_user_info(str(node["name"]))
+            node["name"] = node_name
             imported_node_names.append(node_name)
             node_ident = cls.get_node_identity(node)
 

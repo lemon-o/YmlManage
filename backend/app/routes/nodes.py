@@ -192,7 +192,9 @@ async def fetch_nodes_stream(req: FetchNodesRequest):
                 resolved_sub_source = resolve_sub_source_name(req.source_name, req.url)
 
                 for idx, node in enumerate(raw_nodes):
-                    name = str(node.get("name", f"Node-{idx+1}"))
+                    raw_name = str(node.get("name", f"Node-{idx+1}"))
+                    name = YamlManager.strip_subscription_user_info(raw_name)
+                    node["name"] = name
                     node_ident = YamlManager.get_node_identity(node)
                     is_existing = (node_ident in existing_identities) if node_ident else (name in existing_names)
                     if is_existing:
@@ -332,7 +334,9 @@ async def fetch_nodes_from_subscription(req: FetchNodesRequest):
     resolved_sub_source = resolve_sub_source_name(req.source_name, req.url)
 
     for idx, node in enumerate(raw_nodes):
-        name = str(node.get("name", f"Node-{idx+1}"))
+        raw_name = str(node.get("name", f"Node-{idx+1}"))
+        name = YamlManager.strip_subscription_user_info(raw_name)
+        node["name"] = name
         node_ident = YamlManager.get_node_identity(node)
         is_existing = (node_ident in existing_identities) if node_ident else (name in existing_names)
         if is_existing:
@@ -411,11 +415,16 @@ def import_selected_nodes(req: ImportNodesRequest):
     for item in req.nodes:
         if "raw" in item and isinstance(item["raw"], dict):
             raw_node = dict(item["raw"])
+            clean_name = YamlManager.strip_subscription_user_info(raw_node.get("name", item.get("name", "")))
+            if clean_name:
+                raw_node["name"] = clean_name
             if "sub_source" in item and item["sub_source"]:
                 raw_node["sub_source"] = item["sub_source"]
             nodes_payload.append(raw_node)
         elif isinstance(item, dict) and "name" in item:
-            nodes_payload.append(item)
+            item_copy = dict(item)
+            item_copy["name"] = YamlManager.strip_subscription_user_info(item_copy["name"])
+            nodes_payload.append(item_copy)
 
     try:
         result = YamlManager.inject_nodes(
